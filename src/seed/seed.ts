@@ -1,12 +1,14 @@
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const __dirname = path.dirname(new URL(import.meta.url).pathname);
-  const filePath = path.join(__dirname, 'seed/broker.json');
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const filePath = path.join(__dirname, 'broker.json');
   const file = await fs.readFile(filePath, 'utf-8');
   const brokers = JSON.parse(file);
 

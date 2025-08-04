@@ -7,8 +7,7 @@ import brokerRoutes from './routes/broker.js';
 const prisma = new PrismaClient();
 dotenv.config();
 const app = express();
-const port = process.env.PORT || 3001;
-
+const port = process.env.PORT || 3000;  // Use process.env.PORT for Render or fallback to 3000
 
 app.use(cors());
 app.use(express.json());
@@ -18,4 +17,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-app.listen(port, () => console.log("🚀 Backend running at http://localhost:3001"));
+// Update this to use the dynamic port
+app.listen(port, () => {
+  console.log(`🚀 Backend running at http://localhost:${port}`);
+});
