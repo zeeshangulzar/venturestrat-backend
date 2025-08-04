@@ -1,0 +1,247 @@
+[
+  {
+    "name": "Alpha Ventures",
+    "email": "contact@alphaventures.com",
+    "investment_stage": "Seed",
+    "previous_investments": ["Techify", "GreenLoop", "MedChain"],
+    "website": "https://www.alphaventures.com",
+    "city": "San Francisco",
+    "country": "USA",
+    "phone_number": "+1-415-123-4567",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/alphaventures",
+      "twitter": "https://twitter.com/alphaventures"
+    }
+  },
+  {
+    "name": "GlobalBridge Capital",
+    "email": "info@globalbridge.com",
+    "investment_stage": "Series A",
+    "previous_investments": ["FinBot", "AutoIQ"],
+    "website": "https://www.globalbridge.com",
+    "city": "New York",
+    "country": "USA",
+    "phone_number": "+1-212-555-0100",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/globalbridge"
+    }
+  },
+  {
+    "name": "Summit Equity",
+    "email": "hello@summitequity.com",
+    "investment_stage": "Series B",
+    "previous_investments": ["ShopLite", "DocuSafe", "WareNow"],
+    "website": "https://www.summitequity.com",
+    "city": "London",
+    "country": "UK",
+    "phone_number": "+44 20 7946 0958",
+    "social_links": {
+      "twitter": "https://twitter.com/summitequity"
+    }
+  },
+  {
+    "name": "Next Horizon Ventures",
+    "email": "connect@nexthorizon.com",
+    "investment_stage": "Pre-Seed",
+    "previous_investments": ["Edgelabs"],
+    "website": "https://www.nexthorizon.com",
+    "city": "Berlin",
+    "country": "Germany",
+    "phone_number": "+49 30 1234567",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/nexthorizon"
+    }
+  },
+  {
+    "name": "TechLeap Partners",
+    "email": "partners@techleap.com",
+    "investment_stage": "Seed",
+    "previous_investments": ["NeoHealth", "FleetGo"],
+    "website": "https://www.techleap.com",
+    "city": "Amsterdam",
+    "country": "Netherlands",
+    "phone_number": "+31 20 123 4567",
+    "social_links": {}
+  },
+  {
+    "name": "CapitalWave",
+    "email": "hello@capitalwave.io",
+    "investment_stage": "Series A",
+    "previous_investments": ["SmartTrack", "BioNode"],
+    "website": "https://www.capitalwave.io",
+    "city": "Toronto",
+    "country": "Canada",
+    "phone_number": "+1-416-789-0123",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/capitalwave"
+    }
+  },
+  {
+    "name": "Vanguard Boost",
+    "email": "team@vanguardboost.com",
+    "investment_stage": "Series C",
+    "previous_investments": ["MegaX", "CloudShift"],
+    "website": "https://www.vanguardboost.com",
+    "city": "Los Angeles",
+    "country": "USA",
+    "phone_number": "+1-310-222-0987",
+    "social_links": {}
+  },
+  {
+    "name": "BlueNova Ventures",
+    "email": "invest@bluenova.vc",
+    "investment_stage": "Seed",
+    "previous_investments": ["OmniData", "PixieLab"],
+    "website": "https://www.bluenova.vc",
+    "city": "Austin",
+    "country": "USA",
+    "phone_number": "+1-737-444-8888",
+    "social_links": {
+      "twitter": "https://twitter.com/bluenova"
+    }
+  },
+  {
+    "name": "AsiaSpring Capital",
+    "email": "inquiries@asiaspring.com",
+    "investment_stage": "Pre-Seed",
+    "previous_investments": ["AgroLink"],
+    "website": "https://www.asiaspring.com",
+    "city": "Singapore",
+    "country": "Singapore",
+    "phone_number": "+65 6123 4567",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/asiaspring"
+    }
+  },
+  {
+    "name": "Pulse Equity",
+    "email": "team@pulseequity.co",
+    "investment_stage": "Series B",
+    "previous_investments": ["MedIQ", "SafeFleet"],
+    "website": "https://www.pulseequity.co",
+    "city": "Sydney",
+    "country": "Australia",
+    "phone_number": "+61 2 9876 5432",
+    "social_links": {}
+  },
+  {
+    "name": "Orbit Startups",
+    "email": "hello@orbitstartups.com",
+    "investment_stage": "Seed",
+    "previous_investments": ["NanoPay", "FitCircuit"],
+    "website": "https://www.orbitstartups.com",
+    "city": "Dubai",
+    "country": "UAE",
+    "phone_number": "+971 4 567 8901",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/orbitstartups"
+    }
+  },
+  {
+    "name": "NorthPeak Capital",
+    "email": "contact@northpeak.capital",
+    "investment_stage": "Series A",
+    "previous_investments": ["ClearRoute", "TaxPilot"],
+    "website": "https://www.northpeak.capital",
+    "city": "Stockholm",
+    "country": "Sweden",
+    "phone_number": "+46 8 123 456",
+    "social_links": {}
+  },
+  {
+    "name": "Ignite Ventures",
+    "email": "ignite@ventures.com",
+    "investment_stage": "Series C",
+    "previous_investments": ["LogiNet", "ZoomShift"],
+    "website": "https://www.igniteventures.com",
+    "city": "Dublin",
+    "country": "Ireland",
+    "phone_number": "+353 1 234 5678",
+    "social_links": {
+      "twitter": "https://twitter.com/ignitevc"
+    }
+  },
+  {
+    "name": "LaunchGrid",
+    "email": "admin@launchgrid.com",
+    "investment_stage": "Pre-Seed",
+    "previous_investments": ["InstaShip", "BrightFinance"],
+    "website": "https://www.launchgrid.com",
+    "city": "Paris",
+    "country": "France",
+    "phone_number": "+33 1 5678 2345",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/launchgrid"
+    }
+  },
+  {
+    "name": "RedRock Ventures",
+    "email": "info@redrock.vc",
+    "investment_stage": "Seed",
+    "previous_investments": ["DroneAI", "FarmSync"],
+    "website": "https://www.redrock.vc",
+    "city": "Cape Town",
+    "country": "South Africa",
+    "phone_number": "+27 21 987 6543",
+    "social_links": {}
+  },
+  {
+    "name": "EquityNest",
+    "email": "hello@equitynest.io",
+    "investment_stage": "Series A",
+    "previous_investments": ["CodeBoard", "SaaSKit"],
+    "website": "https://www.equitynest.io",
+    "city": "Oslo",
+    "country": "Norway",
+    "phone_number": "+47 21 123 456",
+    "social_links": {}
+  },
+  {
+    "name": "Vertex Square",
+    "email": "invest@vertexsquare.com",
+    "investment_stage": "Series B",
+    "previous_investments": ["TrackEasy", "PayXpress"],
+    "website": "https://www.vertexsquare.com",
+    "city": "Hong Kong",
+    "country": "Hong Kong",
+    "phone_number": "+852 2345 6789",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/vertexsquare"
+    }
+  },
+  {
+    "name": "DeltaSpark",
+    "email": "team@deltaspark.com",
+    "investment_stage": "Seed",
+    "previous_investments": ["NetStream", "ShopNode"],
+    "website": "https://www.deltaspark.com",
+    "city": "Karachi",
+    "country": "Pakistan",
+    "phone_number": "+92 21 34567890",
+    "social_links": {}
+  },
+  {
+    "name": "IronHill Capital",
+    "email": "contact@ironhillcapital.com",
+    "investment_stage": "Series C",
+    "previous_investments": ["AutoGrid", "AirPath"],
+    "website": "https://www.ironhillcapital.com",
+    "city": "Mumbai",
+    "country": "India",
+    "phone_number": "+91 22 2345 6789",
+    "social_links": {
+      "linkedin": "https://linkedin.com/company/ironhillcapital"
+    }
+  },
+  {
+    "name": "NovaEdge",
+    "email": "invest@novaedge.io",
+    "investment_stage": "Pre-Seed",
+    "previous_investments": ["BrightHome", "MiniFleet"],
+    "website": "https://www.novaedge.io",
+    "city": "Barcelona",
+    "country": "Spain",
+    "phone_number": "+34 93 123 4567",
+    "social_links": {}
+  }
+]
