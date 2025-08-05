@@ -22,6 +22,7 @@ model Broker {
   website              String
   city                 String
   country              String
+  state                String?
   phone_number         String
   social_links         Json
 }
