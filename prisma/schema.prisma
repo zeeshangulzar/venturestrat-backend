@@ -8,21 +8,35 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  createdAt DateTime @default(now())
+  id          String      @id @default(cuid())
+  email       String      @unique
+  createdAt   DateTime    @default(now())
+  shortlists  Shortlist[]
 }
 
-model Broker {
-  id                   String @id @default(cuid())
+model Investor {
+  id                   String   @id @default(cuid())
   name                 String
-  email                String @unique
+  email                String   @unique
   investment_stage     String
+  investment_focus     String
+  investment_type      String
   previous_investments String[]
   website              String
   city                 String
   country              String
-  state                String?
+  state                String
   phone_number         String
   social_links         Json
+  shortlists           Shortlist[]
+}
+
+model Shortlist {
+  id        String   @id @default(cuid())
+  userId    String
+  investorId String
+  user      User     @relation(fields: [userId], references: [id])
+  investor  Investor @relation(fields: [investorId], references: [id])
+
+  @@unique([userId, investorId])
 }
