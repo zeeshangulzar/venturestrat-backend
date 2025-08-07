@@ -1,38 +1,35 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 const router = Router();
 const prisma = new PrismaClient();
 
-// Backend - Fixed investor route with debug logging
 router.get('/investors', async (req, res) => {
-  const { page = 1, search = '', filters = '{}', itemsPerPage = 20 } = req.query;
-  
+  const { page = '1', search = '', filters = '{}', itemsPerPage = '20' } = req.query;
+
   try {
     const parsedFilters = JSON.parse(filters as string);
-    const pageNumber = parseInt(page as string, 10);
-    const itemsPerPageNumber = parseInt(itemsPerPage as string, 10);
+
+    const pageNumber = parseInt(String(page), 10);  // Convert to string first
+    const itemsPerPageNumber = parseInt(String(itemsPerPage), 10);  // Convert to string first
 
     const whereClause: any = {};
 
-    // Only add search filter if search term exists
-    if (search && search.trim() !== '') {
+    if (search && typeof search === 'string' && search.trim() !== '') {
       whereClause.name = {
-        contains: search as string,
-        mode: 'insensitive',
+        contains: search.trim(),
+        mode: Prisma.QueryMode.insensitive,
       };
     }
 
-    // Only add address filters if they exist
     const addressFilter: any = {};
     if (parsedFilters.city) addressFilter.city = parsedFilters.city;
     if (parsedFilters.state) addressFilter.state = parsedFilters.state;
     if (parsedFilters.country) addressFilter.country = parsedFilters.country;
-    
+
     if (Object.keys(addressFilter).length > 0) {
       whereClause.address = addressFilter;
     }
 
-    // Add investment stage filter
     if (parsedFilters.investmentStage?.length) {
       whereClause.stages = {
         some: {
@@ -45,7 +42,6 @@ router.get('/investors', async (req, res) => {
       };
     }
 
-    // Add investor type filter
     if (parsedFilters.investmentType?.length) {
       whereClause.investorTypes = {
         some: {
@@ -58,7 +54,6 @@ router.get('/investors', async (req, res) => {
       };
     }
 
-    // Add investment focus filter
     if (parsedFilters.investmentFocus?.length) {
       whereClause.markets = {
         some: {
@@ -70,7 +65,6 @@ router.get('/investors', async (req, res) => {
         }
       };
     }
-
 
     const investors = await prisma.investor.findMany({
       where: whereClause,
@@ -103,7 +97,6 @@ router.get('/investors', async (req, res) => {
       },
     });
 
-    // Get total count for pagination
     const totalCount = await prisma.investor.count({
       where: whereClause,
     });
@@ -125,22 +118,19 @@ router.get('/investors', async (req, res) => {
 
 router.get('/investment-filters', async (req, res) => {
   try {
-    const { search = '', type = '', page = 1, itemsPerPage = 20 } = req.query;
+    const { search = '', type = '', page = '1', itemsPerPage = '20' } = req.query;
 
-    // Ensure that page and itemsPerPage are integers
-    const pageNumber = parseInt(page, 10);
-    const itemsPerPageNumber = parseInt(itemsPerPage, 10);
+    const pageNumber = parseInt(String(page), 10); // Convert to string first
+    const itemsPerPageNumber = parseInt(String(itemsPerPage), 10); // Convert to string first
 
-    // Calculate pagination values
     const skip = (pageNumber - 1) * itemsPerPageNumber;
     const take = itemsPerPageNumber;
 
-    // Create a base where clause for search functionality
     const searchWhereClause = search
       ? {
           title: {
-            contains: search,
-            mode: 'insensitive', // Case-insensitive search
+            contains: typeof search === 'string' ? search.trim() : '',
+            mode: Prisma.QueryMode.insensitive, // Correct mode type
           },
         }
       : {};
@@ -178,12 +168,13 @@ router.get('/investment-filters', async (req, res) => {
         take: take,
       });
     }
+
     res.json({
-      stages: stages ? stages.map((stage) => stage.title) : [],
-      investmentTypes: investmentTypes ? investmentTypes.map((type) => type.title) : [],
-      investmentFocuses: investmentFocuses ? investmentFocuses.map((focus) => focus.title) : [],
+      stages: stages ? stages.map((stage: { title: string }) => stage.title) : [],
+      investmentTypes: investmentTypes ? investmentTypes.map((type: { title: string }) => type.title) : [],
+      investmentFocuses: investmentFocuses ? investmentFocuses.map((focus: { title: string }) => focus.title) : [],
       pastInvestments: pastInvestments
-        ? pastInvestments.map((investment) => investment.title)
+        ? pastInvestments.map((investment: { title: string }) => investment.title)
         : [],
     });
   } catch (error) {
