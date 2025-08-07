@@ -2,9 +2,9 @@ import express from "express";
 import cors from "cors";
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
-import investorRoutes from './routes/investor';
-import userRoutes from './routes/user';
-import shortlistRoutes from './routes/shortlist'
+import investorRoutes from './routes/investor.js';
+import userRoutes from './routes/user.js';
+import shortlistRoutes from './routes/shortlist.js'
 // import verifyUser from 'middleware/verifyUser';
 
 const prisma = new PrismaClient();
