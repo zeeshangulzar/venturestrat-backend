@@ -8,35 +8,217 @@ datasource db {
 }
 
 model User {
-  id          String      @id @default(cuid())
-  email       String      @unique
-  createdAt   DateTime    @default(now())
-  shortlists  Shortlist[]
+  id         String      @id @default(cuid())
+  email      String      @unique
+  createdAt  DateTime    @default(now())
+  shortlists Shortlist[]
 }
 
 model Investor {
-  id                   String   @id @default(cuid())
-  name                 String
-  email                String   @unique
-  investment_stage     String
-  investment_focus     String
-  investment_type      String
-  previous_investments String[]
-  website              String
-  city                 String
-  country              String
-  state                String
-  phone_number         String
-  social_links         Json
-  shortlists           Shortlist[]
+  id             String       @id @default(cuid())
+  name           String
+  avatar         String?
+  website        String?
+  phone          String?
+  title          String?
+  social_links   Json?
+  pipelines      Json?
+  
+  address        Address?     @relation(fields: [addressId], references: [id])
+  addressId      String?      @map("address_id")
+  company        Company?     @relation(fields: [companyId], references: [id])
+  companyId      String?      @map("company_id")
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  emails         InvestorEmail[]
+  pastInvestments InvestorPastInvestment[]
+  markets        InvestorMarket[]
+  stages         InvestorStage[]
+  investorTypes  InvestorInvestorType[]
+  shortlists     Shortlist[]
+
+  @@index([name])
+  @@index([addressId])
+  @@index([companyId])
+  @@index([createdAt])
+  @@map("investors")
+}
+
+model Company {
+  id        String    @id @default(cuid())
+  title     String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  investors Investor[]
+
+  @@index([title])
+  @@map("companies")
+}
+
+model Address {
+  id      String    @id @default(cuid())
+  city    String
+  state   String
+  country String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investors Investor[]
+
+  @@unique([city, state, country])
+  @@index([city])
+  @@index([country])
+  @@map("addresses")
+}
+
+model InvestorEmail {
+  id       String      @id @default(cuid())
+  email    String      @db.VarChar(255)
+  status   EmailStatus @default(VALID)
+
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String   @map("investor_id")
+
+  @@index([investorId])
+  @@index([email])
+  @@map("investor_emails")
+}
+
+model PastInvestment {
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investorPastInvestments InvestorPastInvestment[]
+
+  @@index([title])
+  @@map("past_investments")
+}
+
+model Market {
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investorMarkets InvestorMarket[]
+
+  @@index([title])
+  @@map("markets")
+}
+
+model Stage {
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investorStages InvestorStage[]
+
+  @@index([title])
+  @@map("stages")
+}
+
+model InvestorType {
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investorInvestorTypes InvestorInvestorType[]
+
+  @@index([title])
+  @@map("investor_types")
+}
+
+model InvestorPastInvestment {
+  id String @id @default(cuid())
+
+  investor           Investor       @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId         String         @map("investor_id")
+  pastInvestment     PastInvestment @relation(fields: [pastInvestmentId], references: [id], onDelete: Cascade)
+  pastInvestmentId   String         @map("past_investment_id")
+
+  createdAt DateTime @default(now())
+
+  @@unique([investorId, pastInvestmentId])
+  @@index([investorId])
+  @@index([pastInvestmentId])
+  @@map("investor_past_investments")
+}
+
+model InvestorMarket {
+  id String @id @default(cuid())
+
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String   @map("investor_id")
+  market     Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  marketId   String   @map("market_id")
+
+  createdAt DateTime @default(now())
+
+  @@unique([investorId, marketId])
+  @@index([investorId])
+  @@index([marketId])
+  @@map("investor_markets")
+}
+
+model InvestorStage {
+  id String @id @default(cuid())
+
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String   @map("investor_id")
+  stage      Stage    @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  stageId    String   @map("stage_id")
+
+  createdAt DateTime @default(now())
+
+  @@unique([investorId, stageId])
+  @@index([investorId])
+  @@index([stageId])
+  @@map("investor_stages")
+}
+
+model InvestorInvestorType {
+  id String @id @default(cuid())
+
+  investor         Investor     @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId       String       @map("investor_id")
+  investorType     InvestorType @relation(fields: [investorTypeId], references: [id], onDelete: Cascade)
+  investorTypeId   String       @map("investor_type_id")
+
+  createdAt DateTime @default(now())
+
+  @@unique([investorId, investorTypeId])
+  @@index([investorId])
+  @@index([investorTypeId])
+  @@map("investor_investor_types")
 }
 
 model Shortlist {
-  id        String   @id @default(cuid())
-  userId    String
-  investorId String
-  user      User     @relation(fields: [userId], references: [id])
-  investor  Investor @relation(fields: [investorId], references: [id])
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  investorId String   @map("investor_id")
+  user       User     @relation(fields: [userId], references: [id])
+  investor   Investor @relation(fields: [investorId], references: [id])
 
   @@unique([userId, investorId])
+  @@index([userId])
+  @@index([investorId])
+}
+
+enum EmailStatus {
+  VALID
+  INVALID
+  PENDING
+  UNKNOWN
 }

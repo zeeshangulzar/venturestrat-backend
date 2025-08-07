@@ -15,7 +15,7 @@ const port = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-app.use('/api/investors', investorRoutes); 
+app.use('/api', investorRoutes); 
 app.use('/api', userRoutes);
 app.use('/api', shortlistRoutes); 
 
