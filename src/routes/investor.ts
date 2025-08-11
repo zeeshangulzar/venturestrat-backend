@@ -183,4 +183,50 @@ router.get('/investment-filters', async (req, res) => {
   }
 });
 
+router.get('/investors/:id', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const investor = await prisma.investor.findUnique({
+      where: { id },
+      include: {
+        address: true,
+        company: true,
+        emails: true,
+        pastInvestments: {
+          include: {
+            pastInvestment: true
+          }
+        },
+        investorTypes: {
+          include: {
+            investorType: true
+          }
+        },
+        stages: {
+          include: {
+            stage: true
+          }
+        },
+        markets: {
+          include: {
+            market: true
+          }
+        }
+      }
+    });
+
+    if (!investor) {
+      return res.status(404).json({ error: 'Investor not found' });
+    }
+
+    res.json({ investor });
+  } catch (error) {
+    console.error('Error fetching investor details:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+
 export default router;
