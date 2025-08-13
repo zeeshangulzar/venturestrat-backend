@@ -66,6 +66,18 @@ router.get('/investors', async (req, res) => {
       };
     }
 
+    if (parsedFilters.pastInvestment?.length) {
+      whereClause.pastInvestments = {
+        some: {
+          pastInvestment: {
+            title: { in: parsedFilters.pastInvestment },
+          },
+        },
+      };
+    }
+
+    console.log('Where Clause:', whereClause);
+
     const investors = await prisma.investor.findMany({
       where: whereClause,
       skip: (pageNumber - 1) * itemsPerPageNumber,

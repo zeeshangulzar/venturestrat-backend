@@ -39,10 +39,15 @@ model Investor {
   investorTypes  InvestorInvestorType[]
   shortlists     Shortlist[]
 
+  // Existing indexes
   @@index([name])
   @@index([addressId])
   @@index([companyId])
   @@index([createdAt])
+  
+  // NEW CRITICAL INDEXES for performance
+  @@index([createdAt, id], map: "investors_created_at_id_idx") // Composite for pagination with consistent ordering
+  
   @@map("investors")
 }
 
@@ -72,6 +77,12 @@ model Address {
   @@unique([city, state, country])
   @@index([city])
   @@index([country])
+  
+  // NEW INDEXES for filter performance
+  @@index([state], map: "addresses_state_idx")
+  @@index([city, state], map: "addresses_city_state_idx") // Composite for city+state filtering
+  @@index([country, state, city], map: "addresses_location_hierarchy_idx") // Composite for location hierarchy
+  
   @@map("addresses")
 }
 
@@ -85,6 +96,7 @@ model InvestorEmail {
 
   @@index([investorId])
   @@index([email])
+  @@index([status], map: "investor_emails_status_idx") // NEW: For filtering by email status
   @@map("investor_emails")
 }
 
@@ -153,6 +165,7 @@ model InvestorPastInvestment {
   @@unique([investorId, pastInvestmentId])
   @@index([investorId])
   @@index([pastInvestmentId])
+  @@index([createdAt], map: "investor_past_investments_created_at_idx") // NEW: For temporal queries
   @@map("investor_past_investments")
 }
 
@@ -169,6 +182,7 @@ model InvestorMarket {
   @@unique([investorId, marketId])
   @@index([investorId])
   @@index([marketId])
+  @@index([createdAt], map: "investor_markets_created_at_idx") // NEW: For temporal queries
   @@map("investor_markets")
 }
 
@@ -185,6 +199,7 @@ model InvestorStage {
   @@unique([investorId, stageId])
   @@index([investorId])
   @@index([stageId])
+  @@index([createdAt], map: "investor_stages_created_at_idx") // NEW: For temporal queries
   @@map("investor_stages")
 }
 
@@ -201,6 +216,7 @@ model InvestorInvestorType {
   @@unique([investorId, investorTypeId])
   @@index([investorId])
   @@index([investorTypeId])
+  @@index([createdAt], map: "investor_investor_types_created_at_idx") // NEW: For temporal queries
   @@map("investor_investor_types")
 }
 
