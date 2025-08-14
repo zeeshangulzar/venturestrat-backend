@@ -9,10 +9,6 @@ pnpm install --frozen-lockfile
 echo "🔧 Generating Prisma client..."
 pnpm run generate
 
-echo "🧹 Resolving any previously failed migrations (idempotent)..."
-# Mark the failed migration as rolled back so deploy can proceed if it exists
-pnpm prisma migrate resolve --rolled-back 20250813043124_ || true
-
 echo "🗄️ Running database migrations..."
 # Use production migration command for Render
 pnpm run migrate:deploy
