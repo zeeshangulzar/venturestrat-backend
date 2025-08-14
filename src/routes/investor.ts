@@ -78,49 +78,40 @@ router.get('/investors', async (req, res) => {
 
     console.log('Where Clause:', whereClause);
 
-    // OPTIMIZATION: Execute queries in parallel for better performance
-    const [investors, totalCount] = await Promise.all([
-      prisma.investor.findMany({
-        where: whereClause,
-        skip: (pageNumber - 1) * itemsPerPageNumber,
-        take: itemsPerPageNumber,
-        include: {
-          address: true,
-          company: true,
-          emails: {
-            take: 5, // OPTIMIZATION: Limit emails to first 5
-          },
-          pastInvestments: {
-            take: 10, // OPTIMIZATION: Limit past investments to first 10
-            include: {
-              pastInvestment: true
-            }
-          },
-          investorTypes: {
-            take: 10, // OPTIMIZATION: Limit investor types to first 10
-            include: {
-              investorType: true
-            }
-          },
-          stages: {
-            take: 10, // OPTIMIZATION: Limit stages to first 10
-            include: {
-              stage: true
-            }
-          },
-          markets: {
-            take: 10, // OPTIMIZATION: Limit markets to first 10
-            include: {
-              market: true
-            }
+    const investors = await prisma.investor.findMany({
+      where: whereClause,
+      skip: (pageNumber - 1) * itemsPerPageNumber,
+      take: itemsPerPageNumber,
+      include: {
+        address: true,
+        company: true,
+        emails: true,
+        pastInvestments: {
+          include: {
+            pastInvestment: true
           }
         },
-        orderBy: { createdAt: 'desc' }, // OPTIMIZATION: Consistent ordering for pagination
-      }),
-      prisma.investor.count({
-        where: whereClause,
-      })
-    ]);
+        investorTypes: {
+          include: {
+            investorType: true
+          }
+        },
+        stages: {
+          include: {
+            stage: true
+          }
+        },
+        markets: {
+          include: {
+            market: true
+          }
+        }
+      },
+    });
+
+    const totalCount = await prisma.investor.count({
+      where: whereClause,
+    });
 
     res.json({
       investors,

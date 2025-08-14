@@ -15,40 +15,48 @@ model User {
 }
 
 model Investor {
-  id              String                   @id @default(cuid())
-  name            String
-  avatar          String?
-  website         String?
-  phone           String?
-  title           String?
-  social_links    Json?
-  pipelines       Json?
-  addressId       String?                  @map("address_id")
-  companyId       String?                  @map("company_id")
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
-  shortlists      Shortlist[]
-  emails          InvestorEmail[]
-  investorTypes   InvestorInvestorType[]
-  markets         InvestorMarket[]
-  pastInvestments InvestorPastInvestment[]
-  stages          InvestorStage[]
-  address         Address?                 @relation(fields: [addressId], references: [id])
-  company         Company?                 @relation(fields: [companyId], references: [id])
+  id             String       @id @default(cuid())
+  name           String
+  avatar         String?
+  website        String?
+  phone          String?
+  title          String?
+  social_links   Json?
+  pipelines      Json?
+  
+  address        Address?     @relation(fields: [addressId], references: [id])
+  addressId      String?      @map("address_id")
+  company        Company?     @relation(fields: [companyId], references: [id])
+  companyId      String?      @map("company_id")
 
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  emails         InvestorEmail[]
+  pastInvestments InvestorPastInvestment[]
+  markets        InvestorMarket[]
+  stages         InvestorStage[]
+  investorTypes  InvestorInvestorType[]
+  shortlists     Shortlist[]
+
+  // Existing indexes
   @@index([name])
   @@index([addressId])
   @@index([companyId])
   @@index([createdAt])
-  @@index([createdAt, id], map: "investors_created_at_id_idx")
+  
+  // NEW CRITICAL INDEXES for performance
+  @@index([createdAt, id], map: "investors_created_at_id_idx") // Composite for pagination with consistent ordering
+  
   @@map("investors")
 }
 
 model Company {
-  id        String     @id @default(cuid())
-  title     String     @unique
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id        String    @id @default(cuid())
+  title     String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
   investors Investor[]
 
   @@index([title])
@@ -56,41 +64,49 @@ model Company {
 }
 
 model Address {
-  id        String     @id @default(cuid())
-  city      String
-  state     String
-  country   String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id      String    @id @default(cuid())
+  city    String
+  state   String
+  country String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   investors Investor[]
 
   @@unique([city, state, country])
   @@index([city])
   @@index([country])
-  @@index([state])
-  @@index([city, state])
-  @@index([country, state, city], map: "addresses_location_hierarchy_idx")
+  
+  // NEW INDEXES for filter performance
+  @@index([state], map: "addresses_state_idx")
+  @@index([city, state], map: "addresses_city_state_idx") // Composite for city+state filtering
+  @@index([country, state, city], map: "addresses_location_hierarchy_idx") // Composite for location hierarchy
+  
   @@map("addresses")
 }
 
 model InvestorEmail {
-  id         String      @id @default(cuid())
-  email      String      @db.VarChar(255)
-  status     EmailStatus @default(VALID)
-  investorId String      @map("investor_id")
-  investor   Investor    @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  id       String      @id @default(cuid())
+  email    String      @db.VarChar(255)
+  status   EmailStatus @default(VALID)
+
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String   @map("investor_id")
 
   @@index([investorId])
   @@index([email])
-  @@index([status])
+  @@index([status], map: "investor_emails_status_idx") // NEW: For filtering by email status
   @@map("investor_emails")
 }
 
 model PastInvestment {
-  id                      String                   @id @default(cuid())
-  title                   String                   @unique @db.VarChar(255)
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   investorPastInvestments InvestorPastInvestment[]
 
   @@index([title])
@@ -98,105 +114,109 @@ model PastInvestment {
 }
 
 model Market {
-  id              String           @id @default(cuid())
-  title           String           @unique @db.VarChar(255)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   investorMarkets InvestorMarket[]
 
   @@index([title])
-  @@index([title, id], map: "idx_markets_title_lookup")
   @@map("markets")
 }
 
 model Stage {
-  id             String          @id @default(cuid())
-  title          String          @unique @db.VarChar(255)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   investorStages InvestorStage[]
 
   @@index([title])
-  @@index([title, id], map: "idx_stages_title_lookup")
   @@map("stages")
 }
 
 model InvestorType {
-  id                    String                 @id @default(cuid())
-  title                 String                 @unique @db.VarChar(255)
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  id    String @id @default(cuid())
+  title String @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   investorInvestorTypes InvestorInvestorType[]
 
   @@index([title])
-  @@index([title, id], map: "idx_investor_types_title_lookup")
   @@map("investor_types")
 }
 
 model InvestorPastInvestment {
-  id               String         @id @default(cuid())
-  investorId       String         @map("investor_id")
-  pastInvestmentId String         @map("past_investment_id")
-  createdAt        DateTime       @default(now())
-  investor         Investor       @relation(fields: [investorId], references: [id], onDelete: Cascade)
-  pastInvestment   PastInvestment @relation(fields: [pastInvestmentId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+
+  investor           Investor       @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId         String         @map("investor_id")
+  pastInvestment     PastInvestment @relation(fields: [pastInvestmentId], references: [id], onDelete: Cascade)
+  pastInvestmentId   String         @map("past_investment_id")
+
+  createdAt DateTime @default(now())
 
   @@unique([investorId, pastInvestmentId])
   @@index([investorId])
   @@index([pastInvestmentId])
-  @@index([createdAt], map: "investor_past_investments_created_at_idx")
-  
-  // NEW: Critical performance index for filtering
-  @@index([pastInvestmentId, investorId], map: "investor_past_investments_past_investment_investor_idx")
-  
+  @@index([createdAt], map: "investor_past_investments_created_at_idx") // NEW: For temporal queries
   @@map("investor_past_investments")
 }
 
 model InvestorMarket {
-  id         String   @id @default(cuid())
-  investorId String   @map("investor_id")
-  marketId   String   @map("market_id")
-  createdAt  DateTime @default(now())
+  id String @id @default(cuid())
+
   investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String   @map("investor_id")
   market     Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  marketId   String   @map("market_id")
+
+  createdAt DateTime @default(now())
 
   @@unique([investorId, marketId])
   @@index([investorId])
   @@index([marketId])
-  @@index([marketId, investorId], map: "idx_investor_markets_filter")
-  @@index([createdAt], map: "investor_markets_created_at_idx")
+  @@index([createdAt], map: "investor_markets_created_at_idx") // NEW: For temporal queries
   @@map("investor_markets")
 }
 
 model InvestorStage {
-  id         String   @id @default(cuid())
-  investorId String   @map("investor_id")
-  stageId    String   @map("stage_id")
-  createdAt  DateTime @default(now())
+  id String @id @default(cuid())
+
   investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId String   @map("investor_id")
   stage      Stage    @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  stageId    String   @map("stage_id")
+
+  createdAt DateTime @default(now())
 
   @@unique([investorId, stageId])
   @@index([investorId])
   @@index([stageId])
-  @@index([stageId, investorId], map: "idx_investor_stages_filter")
-  @@index([createdAt], map: "investor_stages_created_at_idx")
+  @@index([createdAt], map: "investor_stages_created_at_idx") // NEW: For temporal queries
   @@map("investor_stages")
 }
 
 model InvestorInvestorType {
-  id             String       @id @default(cuid())
-  investorId     String       @map("investor_id")
-  investorTypeId String       @map("investor_type_id")
-  createdAt      DateTime     @default(now())
-  investor       Investor     @relation(fields: [investorId], references: [id], onDelete: Cascade)
-  investorType   InvestorType @relation(fields: [investorTypeId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+
+  investor         Investor     @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  investorId       String       @map("investor_id")
+  investorType     InvestorType @relation(fields: [investorTypeId], references: [id], onDelete: Cascade)
+  investorTypeId   String       @map("investor_type_id")
+
+  createdAt DateTime @default(now())
 
   @@unique([investorId, investorTypeId])
   @@index([investorId])
   @@index([investorTypeId])
-  @@index([investorTypeId, investorId], map: "idx_investor_types_filter")
-  @@index([createdAt], map: "investor_investor_types_created_at_idx")
+  @@index([createdAt], map: "investor_investor_types_created_at_idx") // NEW: For temporal queries
   @@map("investor_investor_types")
 }
 
@@ -204,8 +224,8 @@ model Shortlist {
   id         String   @id @default(cuid())
   userId     String   @map("user_id")
   investorId String   @map("investor_id")
-  investor   Investor @relation(fields: [investorId], references: [id])
   user       User     @relation(fields: [userId], references: [id])
+  investor   Investor @relation(fields: [investorId], references: [id])
 
   @@unique([userId, investorId])
   @@index([userId])
