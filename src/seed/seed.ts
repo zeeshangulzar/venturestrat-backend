@@ -1,402 +1,237 @@
-// Commented out code for seeding investors from JSON files
+// Seeding investors from JSON files — store stages/investorTypes as string[] titles (no enums)
 
-// import { PrismaClient } from '@prisma/client';
-// import path from 'path';
-// import fs from 'fs/promises';
-// import { fileURLToPath } from 'url';
-// import { dirname } from 'path';
+import { Prisma, PrismaClient } from '@prisma/client';
+import path from 'path';
+import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
-// const prisma = new PrismaClient({
-//   log: ['error'], // Only log errors to reduce noise
-//   datasources: {
-//     db: {
-//       url: process.env.DATABASE_URL,
-//     },
-//   },
-// });
+const asJson = (v: unknown): Prisma.InputJsonValue => v as unknown as Prisma.InputJsonValue;
 
-// // Helper function to normalize email status
-// function normalizeEmailStatus(status: string): 'VALID' | 'INVALID' | 'PENDING' | 'UNKNOWN' {
-//   const normalizedStatus = status.toUpperCase();
-  
-//   switch (normalizedStatus) {
-//     case 'VALID':
-//       return 'VALID';
-//     case 'INVALID':
-//       return 'INVALID';
-//     case 'PENDING':
-//       return 'PENDING';
-//     case 'UNKNOWN':
-//       return 'UNKNOWN';
-//     default:
-//       return 'UNKNOWN'; // Default fallback
-//   }
-// }
+const prisma = new PrismaClient({
+  log: ['error'],
+  datasources: {
+    db: { url: process.env.DATABASE_URL },
+  },
+});
 
-// interface InvestorData {
-//   id: string;
-//   name: string;
-//   avatar?: string;
-//   twitter?: string;
-//   linkedin?: string;
-//   website?: string;
-//   facebook?: string;
-//   phone?: string;
-//   title?: string;
-//   city?: {
-//     id: string;
-//     title: string;
-//   };
-//   state?: {
-//     id: string;
-//     title: string;
-//   };
-//   country?: {
-//     id: string;
-//     title: string;
-//   };
-//   company?: {
-//     id: string;
-//     title: string;
-//   };
-//   emails: Array<{
-//     email: string;
-//     id: string;
-//     status: string;
-//   }>;
-//   pastInvestments: Array<{
-//     id: string;
-//     title: string;
-//   }>;
-//   markets: Array<{
-//     id: string;
-//     title: string;
-//   }>;
-//   stages: Array<{
-//     id: string;
-//     title: string;
-//   }>;
-//   investorTypes: Array<{
-//     id: string;
-//     title: string;
-//   }>;
-//   pipelines: any[];
-// }
+// ---------- helpers ----------
+function norm(v?: string | null): string | null {
+  if (v == null) return null;
+  const t = String(v).trim();
+  return t.length ? t : null;
+}
+function normalizeEmailStatus(status?: string): 'VALID' | 'INVALID' | 'PENDING' | 'UNKNOWN' {
+  const s = (status || '').toUpperCase();
+  if (s === 'VALID' || s === 'INVALID' || s === 'PENDING' || s === 'UNKNOWN') return s as any;
+  return 'UNKNOWN';
+}
 
-// async function main() {
+// Keep input shape
+interface InvestorData {
+  id: string;
+  name: string;
+  avatar?: string;
+  twitter?: string;
+  linkedin?: string;
+  website?: string;
+  facebook?: string;
+  phone?: string;
+  title?: string;
+  city?: { id: string; title: string };
+  state?: { id: string; title: string };
+  country?: { id: string; title: string };
+  company?: { id: string; title: string };
+  emails: Array<{ email: string; id: string; status: string }>;
+  pastInvestments: Array<{ id: string; title: string }>;
+  markets: Array<{ id: string; title: string }>;
+  stages: Array<{ id: string; title: string }>;
+  investorTypes: Array<{ id: string; title: string }>;
+  pipelines: any[];
+  foundedCompanies: any[];
+  sourceData?: any;
+  externalId?: string;
+}
 
-//   const __dirname = dirname(fileURLToPath(import.meta.url));
-//   const dataDirectory = path.join(__dirname, 'ibra');
+async function main() {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const dataDirectory = path.join(__dirname, 'ibra');
 
-//   try {
-//     // Read all JSON files in the 'ibra' folder
-//     const files = await fs.readdir(dataDirectory);
-//     const jsonFiles = files.filter(file => file.endsWith('.json'));
+  try {
+    const files = await fs.readdir(dataDirectory);
+    const jsonFiles = files.filter(f => f.endsWith('.json'));
+    console.log(`📁 Found ${jsonFiles.length} JSON files to process`);
 
-//     console.log(`📁 Found ${jsonFiles.length} JSON files to process`);
+    const uniqueMarkets = new Set<string>();
+    const uniquePastInvestments = new Set<string>();
+    const allInvestorsData: InvestorData[] = [];
 
-//     // Collect all unique reference data first
-//     const uniqueCompanies = new Set<string>();
-//     const uniqueAddresses = new Map<string, { city: string; state: string; country: string }>();
-//     const uniqueMarkets = new Set<string>();
-//     const uniquePastInvestments = new Set<string>();
-//     const uniqueStages = new Set<string>();
-//     const uniqueInvestorTypes = new Set<string>();
+    // 1) read & collect uniques (with types)
+    for (const file of jsonFiles) {
+      const filePath = path.join(dataDirectory, file);
+      const fileContent = await fs.readFile(filePath, 'utf-8');
+      const dataRaw = JSON.parse(fileContent) as unknown;
+      const arr: InvestorData[] = Array.isArray(dataRaw)
+        ? (dataRaw as InvestorData[])
+        : [dataRaw as InvestorData];
 
-//     let allInvestorsData: InvestorData[] = [];
+      allInvestorsData.push(...arr);
 
-//     // First pass: collect all unique reference data
-//     for (const file of jsonFiles) {
-//       const filePath = path.join(dataDirectory, file);
-//       const fileContent = await fs.readFile(filePath, 'utf-8');
-//       const data = JSON.parse(fileContent);
+      for (const inv of arr) {
+        inv.markets?.forEach((m: InvestorData['markets'][number]) => {
+          const t = m?.title?.trim();
+          if (t) uniqueMarkets.add(t);
+        });
+        inv.pastInvestments?.forEach((p: InvestorData['pastInvestments'][number]) => {
+          const t = p?.title?.trim();
+          if (t) uniquePastInvestments.add(t);
+        });
+      }
+    }
 
-//       // Handle both single object and array formats
-//       const investorsArray = Array.isArray(data) ? data : [data];
-//       allInvestorsData.push(...investorsArray);
+    console.log(`📈 Totals:
+    - Markets (unique): ${uniqueMarkets.size}
+    - Past Investments (unique): ${uniquePastInvestments.size}
+    - Investors (raw): ${allInvestorsData.length}`);
 
-//       for (const investorData of investorsArray) {
-//         // Collect companies
-//         if (investorData.company?.title) {
-//           uniqueCompanies.add(investorData.company.title);
-//         }
+    // 2) create reference data (Markets & PastInvestments only)
+    if (uniqueMarkets.size) {
+      console.log('🎯 Creating markets...');
+      await prisma.market.createMany({
+        data: Array.from(uniqueMarkets).map(title => ({ title })),
+        skipDuplicates: true,
+      });
+    }
+    if (uniquePastInvestments.size) {
+      console.log('💰 Creating past investments...');
+      await prisma.pastInvestment.createMany({
+        data: Array.from(uniquePastInvestments).map(title => ({ title })),
+        skipDuplicates: true,
+      });
+    }
 
-//         // Collect addresses
-//         if (investorData.city?.title && investorData.state?.title && investorData.country?.title) {
-//           const addressKey = `${investorData.city.title}-${investorData.state.title}-${investorData.country.title}`;
-//           uniqueAddresses.set(addressKey, {
-//             city: investorData.city.title,
-//             state: investorData.state.title,
-//             country: investorData.country.title
-//           });
-//         }
+    // 3) read back reference maps
+    console.log('🔍 Loading reference IDs...');
+    const [markets, pastInvestments] = await Promise.all([
+      prisma.market.findMany(),
+      prisma.pastInvestment.findMany(),
+    ]);
+    const marketsMap = new Map(markets.map(m => [m.title, m.id]));
+    const pastInvestmentsMap = new Map(pastInvestments.map(p => [p.title, p.id]));
 
-//         // Collect markets
-//         investorData.markets?.forEach((market: any) => {
-//           if (market.title) uniqueMarkets.add(market.title);
-//         });
+    // 4) create investors + relations in batches (NO de-dup)
+    console.log('👤 Creating investors...');
+    const batchSize = 500;
+    let processed = 0;
 
-//         // Collect past investments
-//         investorData.pastInvestments?.forEach((investment: any) => {
-//           if (investment.title) uniquePastInvestments.add(investment.title);
-//         });
+    const totalBatches = Math.ceil(allInvestorsData.length / batchSize);
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const start = batchIndex * batchSize;
+      const end = Math.min(start + batchSize, allInvestorsData.length);
+      const batch = allInvestorsData.slice(start, end);
 
-//         // Collect stages
-//         investorData.stages?.forEach((stage: any) => {
-//           if (stage.title) uniqueStages.add(stage.title);
-//         });
+      console.log(`🔄 Batch ${batchIndex + 1}/${totalBatches} (${start + 1}-${end})`);
 
-//         // Collect investor types
-//         investorData.investorTypes?.forEach((type: any) => {
-//           if (type.title) uniqueInvestorTypes.add(type.title);
-//         });
-//       }
-//     }
+      try {
+        await prisma.$transaction(async (tx) => {
+          for (const inv of batch) {
+            // social links json (as InputJsonValue or omit)
+            const social: Record<string, string> = {};
+            if (inv.twitter)  social.twitter  = inv.twitter;
+            if (inv.linkedin) social.linkedin = inv.linkedin;
+            if (inv.facebook) social.facebook = inv.facebook;
 
-//     console.log(`📈 Found unique data:
-//     - Companies: ${uniqueCompanies.size}
-//     - Addresses: ${uniqueAddresses.size}
-//     - Markets: ${uniqueMarkets.size}
-//     - Past Investments: ${uniquePastInvestments.size}
-//     - Stages: ${uniqueStages.size}
-//     - Investor Types: ${uniqueInvestorTypes.size}
-//     - Total Investors: ${allInvestorsData.length}`);
+            const socialLinks: Prisma.InputJsonValue | undefined =
+              Object.keys(social).length ? (social as Prisma.InputJsonValue) : undefined;
 
-//     // Step 1: Create all companies
-//     console.log('🏢 Creating companies...');
-//     if (uniqueCompanies.size > 0) {
-//       await prisma.company.createMany({
-//         data: Array.from(uniqueCompanies).map(title => ({ title })),
-//         skipDuplicates: true
-//       });
-//     }
+            // STAGES as string[] (titles directly)
+            const mappedStages: string[] =
+              (inv.stages ?? [])
+                .map(s => (s?.title ?? '').trim())
+                .filter((t): t is string => !!t);
 
-//     // Step 2: Create all addresses
-//     console.log('📍 Creating addresses...');
-//     if (uniqueAddresses.size > 0) {
-//       await prisma.address.createMany({
-//         data: Array.from(uniqueAddresses.values()),
-//         skipDuplicates: true
-//       });
-//     }
+            // INVESTOR TYPES as string[] (titles directly)
+            const types: string[] =
+              (inv.investorTypes ?? [])
+                .map(t => (t?.title ?? '').trim())
+                .filter((x): x is string => !!x);
 
-//     // Step 3: Create all markets
-//     console.log('🎯 Creating markets...');
-//     if (uniqueMarkets.size > 0) {
-//       await prisma.market.createMany({
-//         data: Array.from(uniqueMarkets).map(title => ({ title })),
-//         skipDuplicates: true
-//       });
-//     }
+            const created = await tx.investor.create({
+              data: {
+                externalId: inv.id,                 
+                name:       inv.name,
+                avatar:     inv.avatar,
+                website:    inv.website,
+                phone:      inv.phone,
+                title:      inv.title,
+                // merged address/company strings
+                city:       norm(inv.city?.title),
+                state:      norm(inv.state?.title),
+                country:    norm(inv.country?.title),
+                companyName:norm(inv.company?.title),
+                // arrays as strings
+                stages:        mappedStages,
+                investorTypes: types,
+                // json
+                social_links:     socialLinks,
+                pipelines:        asJson(inv.pipelines ?? []),
+                foundedCompanies: asJson(inv.foundedCompanies ?? []),
+                sourceData:       asJson(inv),
+              },
+            });
 
-//     // Step 4: Create all past investments
-//     console.log('💰 Creating past investments...');
-//     if (uniquePastInvestments.size > 0) {
-//       await prisma.pastInvestment.createMany({
-//         data: Array.from(uniquePastInvestments).map(title => ({ title })),
-//         skipDuplicates: true
-//       });
-//     }
+            // emails (new model Email)
+            if (inv.emails?.length) {
+              await tx.email.createMany({
+                data: inv.emails.map((e) => ({
+                  email: e.email,
+                  status: normalizeEmailStatus(e.status),
+                  investorId: created.id,
+                })),
+                skipDuplicates: true, // keep to avoid exact-duplicate rows
+              });
+            }
 
-//     // Step 5: Create all stages
-//     console.log('📈 Creating stages...');
-//     if (uniqueStages.size > 0) {
-//       await prisma.stage.createMany({
-//         data: Array.from(uniqueStages).map(title => ({ title })),
-//         skipDuplicates: true
-//       });
-//     }
+            // markets (join)
+            if (inv.markets?.length) {
+              const rows = inv.markets
+                .filter((m) => !!m?.title && marketsMap.has(m.title))
+                .map((m) => ({ investorId: created.id, marketId: marketsMap.get(m.title)! }));
+              if (rows.length) await tx.investorMarket.createMany({ data: rows, skipDuplicates: true });
+            }
 
-//     // Step 6: Create all investor types
-//     console.log('👥 Creating investor types...');
-//     if (uniqueInvestorTypes.size > 0) {
-//       await prisma.investorType.createMany({
-//         data: Array.from(uniqueInvestorTypes).map(title => ({ title })),
-//         skipDuplicates: true
-//       });
-//     }
+            // past investments (join)
+            if (inv.pastInvestments?.length) {
+              const rows = inv.pastInvestments
+                .filter((p) => !!p?.title && pastInvestmentsMap.has(p.title))
+                .map((p) => ({ investorId: created.id, pastInvestmentId: pastInvestmentsMap.get(p.title)! }));
+              if (rows.length) await tx.investorPastInvestment.createMany({ data: rows, skipDuplicates: true });
+            }
 
-//     // Step 7: Get all reference data for mapping
-//     console.log('🔍 Fetching reference data for mapping...');
-//     const companiesMap = new Map();
-//     const addressesMap = new Map();
-//     const marketsMap = new Map();
-//     const pastInvestmentsMap = new Map();
-//     const stagesMap = new Map();
-//     const investorTypesMap = new Map();
+            processed++;
+          }
+        }, { maxWait: 10_000, timeout: 60_000 });
 
-//     // Fetch and map all reference data
-//     const [companies, addresses, markets, pastInvestments, stages, investorTypes] = await Promise.all([
-//       prisma.company.findMany(),
-//       prisma.address.findMany(),
-//       prisma.market.findMany(),
-//       prisma.pastInvestment.findMany(),
-//       prisma.stage.findMany(),
-//       prisma.investorType.findMany()
-//     ]);
+        if (batchIndex < totalBatches - 1) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+        console.log(`✅ Batch ${batchIndex + 1}/${totalBatches} done. Processed ${processed}/${allInvestorsData.length}`);
+      } catch (err) {
+        console.error(`❌ Batch ${batchIndex + 1} failed:`, err);
+        // continue with the next batch
+      }
+    }
 
-//     companies.forEach(c => companiesMap.set(c.title, c.id));
-//     addresses.forEach(a => addressesMap.set(`${a.city}-${a.state}-${a.country}`, a.id));
-//     markets.forEach(m => marketsMap.set(m.title, m.id));
-//     pastInvestments.forEach(p => pastInvestmentsMap.set(p.title, p.id));
-//     stages.forEach(s => stagesMap.set(s.title, s.id));
-//     investorTypes.forEach(i => investorTypesMap.set(i.title, i.id));
+    console.log(`🎉 Done. Inserted ${processed} investors.`);
+  } catch (error) {
+    console.error('Seeding failed:', error);
+    throw error;
+  }
+}
 
-//     // Step 8: Create investors in smaller batches with connection management
-//     console.log('👤 Creating investors...');
-//     const batchSize = 50; // Reduced batch size for better connection management
-//     let processedCount = 0;
-//     const totalBatches = Math.ceil(allInvestorsData.length / batchSize);
-
-//     for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-//       const start = batchIndex * batchSize;
-//       const end = Math.min(start + batchSize, allInvestorsData.length);
-//       const batch = allInvestorsData.slice(start, end);
-      
-//       console.log(`🔄 Processing batch ${batchIndex + 1}/${totalBatches} (${start + 1}-${end} of ${allInvestorsData.length})`);
-      
-//       // Process batch in transaction for better performance and consistency
-//       try {
-//         await prisma.$transaction(async (tx) => {
-//           for (const investorData of batch) {
-//             try {
-//               // Prepare address and company IDs
-//               const addressKey = investorData.city?.title && investorData.state?.title && investorData.country?.title
-//                 ? `${investorData.city.title}-${investorData.state.title}-${investorData.country.title}`
-//                 : null;
-              
-//               const addressId = addressKey ? addressesMap.get(addressKey) : null;
-//               const companyId = investorData.company?.title ? companiesMap.get(investorData.company.title) : null;
-
-//               // Create social links JSON
-//               const socialLinks = {};
-//               if (investorData.twitter) socialLinks.twitter = investorData.twitter;
-//               if (investorData.linkedin) socialLinks.linkedin = investorData.linkedin;
-//               if (investorData.facebook) socialLinks.facebook = investorData.facebook;
-
-//               // Create investor
-//               const investor = await tx.investor.create({
-//                 data: {
-//                   name: investorData.name,
-//                   avatar: investorData.avatar,
-//                   website: investorData.website,
-//                   phone: investorData.phone,
-//                   title: investorData.title,
-//                   social_links: Object.keys(socialLinks).length > 0 ? socialLinks : null,
-//                   pipelines: investorData.pipelines || [],
-//                   addressId,
-//                   companyId,
-//                 }
-//               });
-
-//               // Create emails with status validation
-//               if (investorData.emails?.length > 0) {
-//                 await tx.investorEmail.createMany({
-//                   data: investorData.emails.map(email => ({
-//                     email: email.email,
-//                     status: normalizeEmailStatus(email.status),
-//                     investorId: investor.id
-//                   })),
-//                   skipDuplicates: true
-//                 });
-//               }
-
-//               // Create relationships in batches
-//               const relationshipPromises = [];
-
-//               // Markets
-//               if (investorData.markets?.length > 0) {
-//                 const marketRelations = investorData.markets
-//                   .filter(m => marketsMap.has(m.title))
-//                   .map(m => ({ investorId: investor.id, marketId: marketsMap.get(m.title) }));
-                
-//                 if (marketRelations.length > 0) {
-//                   relationshipPromises.push(
-//                     tx.investorMarket.createMany({ data: marketRelations, skipDuplicates: true })
-//                   );
-//                 }
-//               }
-
-//               // Past Investments
-//               if (investorData.pastInvestments?.length > 0) {
-//                 const investmentRelations = investorData.pastInvestments
-//                   .filter(p => pastInvestmentsMap.has(p.title))
-//                   .map(p => ({ investorId: investor.id, pastInvestmentId: pastInvestmentsMap.get(p.title) }));
-                
-//                 if (investmentRelations.length > 0) {
-//                   relationshipPromises.push(
-//                     tx.investorPastInvestment.createMany({ data: investmentRelations, skipDuplicates: true })
-//                   );
-//                 }
-//               }
-
-//               // Stages
-//               if (investorData.stages?.length > 0) {
-//                 const stageRelations = investorData.stages
-//                   .filter(s => stagesMap.has(s.title))
-//                   .map(s => ({ investorId: investor.id, stageId: stagesMap.get(s.title) }));
-                
-//                 if (stageRelations.length > 0) {
-//                   relationshipPromises.push(
-//                     tx.investorStage.createMany({ data: stageRelations, skipDuplicates: true })
-//                   );
-//                 }
-//               }
-
-//               // Investor Types
-//               if (investorData.investorTypes?.length > 0) {
-//                 const typeRelations = investorData.investorTypes
-//                   .filter(t => investorTypesMap.has(t.title))
-//                   .map(t => ({ investorId: investor.id, investorTypeId: investorTypesMap.get(t.title) }));
-                
-//                 if (typeRelations.length > 0) {
-//                   relationshipPromises.push(
-//                     tx.investorInvestorType.createMany({ data: typeRelations, skipDuplicates: true })
-//                   );
-//                 }
-//               }
-
-//               // Execute all relationship creations
-//               if (relationshipPromises.length > 0) {
-//                 await Promise.all(relationshipPromises);
-//               }
-
-//               processedCount++;
-
-//             } catch (error) {
-//               console.error(`❌ Failed to create investor ${investorData.name}:`, error);
-//               throw error; // Re-throw to rollback transaction
-//             }
-//           }
-//         }, {
-//           maxWait: 10000, // 10 seconds max wait
-//           timeout: 60000, // 60 seconds timeout
-//         });
-
-//         // Add a small delay between batches to prevent overwhelming the database
-//         if (batchIndex < totalBatches - 1) {
-//           await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
-//         }
-
-//         console.log(`✅ Completed batch ${batchIndex + 1}/${totalBatches}. Total processed: ${processedCount}/${allInvestorsData.length}`);
-
-//       } catch (error) {
-//         console.error(`Failed to process batch ${batchIndex + 1}:`, error);
-//         // Continue with next batch instead of stopping completely
-//         continue;
-//       }
-//     }
-
-
-//   } catch (error) {
-//     console.error('Seeding failed:', error);
-//     throw error;
-//   }
-// }
-
-// main()
-//   .catch((e) => {
-//     console.error('Seed failed:', e);
-//     process.exit(1);
-//   })
-//   .finally(() => prisma.$disconnect());
+main()
+  .catch((e) => {
+    console.error('Seed failed:', e);
+    process.exit(1);
+  })
+  .finally(() => prisma.$disconnect());

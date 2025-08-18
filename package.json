@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "migrate": "prisma migrate dev",
     "generate": "prisma generate",
-    "seed": "ts-node src/seed/seed.ts"
+    "seed": "ts-node src/seed/seed.ts",
+    "fix:country": "tsx src/seed/updateCountry.ts"
   },
   "packageManager": "pnpm@10.14.0",
   "dependencies": {
