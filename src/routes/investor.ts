@@ -92,6 +92,13 @@ router.get('/investors', async (req, res) => {
           pastInvestments: { include: { pastInvestment: true } },
           markets: { include: { market: true } },
         },
+        omit: {
+          createdAt: true,
+          updatedAt: true,
+          externalId: true,
+          sourceData: true,
+          avatar: true
+        },
       }),
       prisma.investor.count({ where: whereClause }),
     ]);
