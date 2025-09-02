@@ -23,10 +23,15 @@ enum EmailStatus {
    ========================= */
 
 model User {
-  id         String      @id @default(cuid())
-  email      String      @unique
-  createdAt  DateTime    @default(now())
-  shortlists Shortlist[]
+  id                 String      @id
+  email              String      @unique
+  firstname          String?
+  lastname           String?
+  role               String      @default("moderator")
+  onboardingComplete Boolean     @default(false)
+  publicMetaData     Json?
+  createdAt          DateTime    @default(now())
+  shortlists         Shortlist[]
 }
 
 model Investor {

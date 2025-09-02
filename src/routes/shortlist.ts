@@ -8,29 +8,25 @@ const prisma = new PrismaClient();
 // POST /shortlist
 router.post('/shortlist', async (req, res) => {
   const { userId, email, investorId } = req.body;
+  console.log('Received shortlist request:', { userId, email, investorId });
 
   if (!userId || !email || !investorId) {
     return res.status(400).json({ error: 'Missing fields' });
   }
 
   try {
-    // Find or create the user
-    let user = await prisma.user.findUnique({ where: { id: userId } });
-
+    // Check if user exists (should be created via Clerk webhook)
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    
     if (!user) {
-      user = await prisma.user.create({
-        data: {
-          id: userId,
-          email,
-        },
-      });
+      return res.status(404).json({ error: 'User not found. Please ensure you are authenticated.' });
     }
 
     // Check for existing shortlist
     const existingShortlist = await prisma.shortlist.findUnique({
       where: {
         userId_investorId: {
-          userId,
+          userId: user.id,
           investorId,
         },
       },
@@ -42,7 +38,7 @@ router.post('/shortlist', async (req, res) => {
 
     const shortlist = await prisma.shortlist.create({
       data: {
-        userId,
+        userId: user.id,
         investorId,
       },
     });
