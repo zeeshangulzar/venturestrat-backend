@@ -20,7 +20,9 @@
     "cors": "^2.8.5",
     "country-state-city": "^3.2.1",
     "dotenv": "^17.2.1",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2",
+    "svix": "^1.75.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
