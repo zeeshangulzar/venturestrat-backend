@@ -120,82 +120,47 @@ router.get('/investors', async (req, res) => {
 
 router.get('/investment-filters', async (req, res) => {
   try {
-    const { search = '', type = '', page = '1', itemsPerPage = '20' } = req.query;
-
-    const pageNumber = Number.parseInt(String(page), 10) || 1;
-    const itemsPerPageNumber = Number.parseInt(String(itemsPerPage), 10) || 20;
-
+    const { search = '' } = req.query;
     const q = norm(typeof search === 'string' ? search : '');
-    const wantAll = !type;
 
-    let stages: string[] | undefined;
-    let investmentTypes: string[] | undefined;
-    let investmentFocuses: string[] | undefined;
-    let pastInvestments: string[] | undefined;
-
-    // ---- Stages: enum (no table) ----
-    if (wantAll || type === 'investmentStages') {
-      const allStages = await prisma.investor.findMany({
+    // Get all filter values without pagination or search filtering
+    const [allStages, allTypes, allMarkets, allPastInvestments] = await Promise.all([
+      // ---- Stages: enum (no table) ----
+      prisma.investor.findMany({
         distinct: ['stages'],
         select: { stages: true },
-      });
+      }).then(stages => {
+        const flatStages = stages.flatMap(inv => inv.stages || []);
+        return [...new Set(flatStages)].sort();
+      }),
 
-      const flatStages = allStages.flatMap(inv => inv.stages || []);
-      const uniqueStages = [...new Set(flatStages)];
-
-      const filtered = q
-        ? uniqueStages.filter(s => s.toLowerCase().includes(q.toLowerCase()))
-        : uniqueStages;
-
-      stages = paginate(filtered, pageNumber, itemsPerPageNumber);
-    }
-
-    // ---- Investor Types ----
-    if (wantAll || type === 'investmentTypes') {
-      const allTypes = await prisma.investor.findMany({
+      // ---- Investor Types ----
+      prisma.investor.findMany({
         distinct: ['investorTypes'],
         select: { investorTypes: true },
-      });
+      }).then(types => {
+        const flatTypes = types.flatMap(inv => inv.investorTypes || []);
+        return [...new Set(flatTypes)].sort();
+      }),
 
-      const flatTypes = allTypes.flatMap(inv => inv.investorTypes || []);
-      const uniqueTypes = [...new Set(flatTypes)];
-
-      const filtered = q
-        ? uniqueTypes.filter(t => t.toLowerCase().includes(q.toLowerCase()))
-        : uniqueTypes;
-
-      investmentTypes = paginate(filtered, pageNumber, itemsPerPageNumber);
-    }
-
-    // ---- Markets: table ----
-    if (wantAll || type === 'investmentFocuses') {
-      const where = q ? { title: { contains: q, mode: Prisma.QueryMode.insensitive } } : {};
-      const rows = await prisma.market.findMany({
-        where,
-        skip: (pageNumber - 1) * itemsPerPageNumber,
-        take: itemsPerPageNumber,
+      // ---- Markets: table ----
+      prisma.market.findMany({
         orderBy: { title: 'asc' },
-      });
-      investmentFocuses = rows.map(r => r.title);
-    }
+      }).then(markets => markets.map(m => m.title)),
 
-    // ---- Past Investments: table ----
-    if (wantAll || type === 'pastInvestments') {
-      const where = q ? { title: { contains: q, mode: Prisma.QueryMode.insensitive } } : {};
-      const rows = await prisma.pastInvestment.findMany({
-        where,
-        skip: (pageNumber - 1) * itemsPerPageNumber,
-        take: itemsPerPageNumber,
+      // ---- Past Investments: table with search filter ----
+      prisma.pastInvestment.findMany({
+        where: q ? { title: { contains: q, mode: Prisma.QueryMode.insensitive } } : {},
+        take: 20,
         orderBy: { title: 'asc' },
-      });
-      pastInvestments = rows.map(r => r.title);
-    }
+      }).then(pastInvestments => pastInvestments.map(pi => pi.title)),
+    ]);
 
     res.json({
-      stages: stages ?? [],
-      investmentTypes: investmentTypes ?? [],
-      investmentFocuses: investmentFocuses ?? [],
-      pastInvestments: pastInvestments ?? [],
+      stages: allStages,
+      investmentTypes: allTypes,
+      investmentFocuses: allMarkets,
+      pastInvestments: allPastInvestments,
     });
   } catch (error) {
     console.error('Error fetching investment filters:', error);
