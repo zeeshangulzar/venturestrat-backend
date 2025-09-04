@@ -31,6 +31,22 @@ router.post('/createOrFindUser', async (req, res) => {
   }
 });
 
+// GET /users - Get all users
+router.get('/users', async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      orderBy: {
+        createdAt: 'desc'
+      },
+    });
+
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // PUT /user/:userId - Update user information
 router.put('/user/:userId', async (req, res) => {
   const { userId } = req.params;
