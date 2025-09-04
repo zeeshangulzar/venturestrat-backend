@@ -173,7 +173,7 @@ router.get('/investment-filters', async (req, res) => {
       const rows = await prisma.market.findMany({
         where,
         skip: (pageNumber - 1) * itemsPerPageNumber,
-        take: itemsPerPageNumber,
+        // take: itemsPerPageNumber,
         orderBy: { title: 'asc' },
       });
       investmentFocuses = rows.map(r => r.title);
