@@ -18,6 +18,12 @@ enum EmailStatus {
   UNKNOWN
 }
 
+enum MessageStatus {
+  DRAFT
+  SENT
+  FAILED
+}
+
 /* =========================
    Core Models
    ========================= */
@@ -32,6 +38,7 @@ model User {
   publicMetaData     Json?
   createdAt          DateTime    @default(now())
   shortlists         Shortlist[]
+  messages           Message[]
 }
 
 model Investor {
@@ -60,6 +67,7 @@ model Investor {
   markets           InvestorMarket[]
   shortlists        Shortlist[]
   sourceData    Json?
+  messages          Message[]
 
   // Indexes for common filters & pagination
   @@index([name])
@@ -163,4 +171,20 @@ model Shortlist {
   @@unique([userId, investorId])
   @@index([userId])
   @@index([investorId])
+}
+
+model Message {
+  id         String        @id @default(cuid())
+  user       User          @relation(fields: [userId], references: [id])
+  userId     String
+  investor   Investor      @relation(fields: [investorId], references: [id])
+  investorId String
+
+  status     MessageStatus @default(DRAFT)
+  to         String[]      
+  subject    String
+  from       String
+  body       String        
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 }
