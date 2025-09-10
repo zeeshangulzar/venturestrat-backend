@@ -198,8 +198,8 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     // Prepare email data
     const emailData = {
-      to: 'xeetest786@gmail.com',
-      from: 'ikram.akram@xcorebit.com',
+      to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
+      from: message.from,
       subject: message.subject,
       text: message.body,
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -211,8 +211,8 @@ router.post('/message/:messageId/send', async (req, res) => {
     };
 
     console.log('Sending email:', {
-      to: 'ikram.akram@xcorebit.com',
-      from: 'xeetest786@gmail.com',
+      to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
+      from: message.from,
       subject: message.subject
     });
 

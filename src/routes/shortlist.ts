@@ -83,7 +83,11 @@ router.get('/user/:userId/details', async (req, res) => {
       include: {
         shortlists: {
           include: {
-            investor: true,
+            investor: {
+              include: {
+                emails: true,
+              },
+            },
           },
         },
       },
