@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
+import sgMail from '@sendgrid/mail';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// Initialize SendGrid
+sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
 
 // 1. Create a new message
 router.post('/message', async (req, res) => {
@@ -161,6 +165,116 @@ router.get('/messages/sent/:userId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching sent messages:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// 5. Send message via email
+router.post('/message/:messageId/send', async (req, res) => {
+  const { messageId } = req.params;
+  console.log('Received send message request for messageId:', messageId);
+
+  try {
+    // Check if SendGrid API key is configured
+    if (!process.env.SENDGRID_API_KEY) {
+      return res.status(500).json({ error: 'SendGrid API key not configured' });
+    }
+
+    console.log('SendGrid API Key configured:', process.env.SENDGRID_API_KEY ? 'Yes' : 'No');
+    console.log('API Key length:', process.env.SENDGRID_API_KEY?.length);
+
+    // Get the message
+    const message = await prisma.message.findUnique({
+      where: { id: messageId }
+    });
+
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Check if message is already sent
+    if (message.status === 'SENT') {
+      return res.status(400).json({ error: 'Message has already been sent' });
+    }
+
+    // Prepare email data
+    const emailData = {
+      to: 'xeetest786@gmail.com',
+      from: 'ikram.akram@xcorebit.com',
+      subject: message.subject,
+      text: message.body,
+      html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+               <h2>${message.subject}</h2>
+               <div style="margin-top: 20px;">
+                 ${message.body.replace(/\n/g, '<br>')}
+               </div>
+             </div>`
+    };
+
+    console.log('Sending email:', {
+      to: 'ikram.akram@xcorebit.com',
+      from: 'xeetest786@gmail.com',
+      subject: message.subject
+    });
+
+    // Send email via SendGrid
+    await sgMail.send(emailData);
+
+    // Update message status to SENT
+    const updatedMessage = await prisma.message.update({
+      where: { id: messageId },
+      data: { status: 'SENT' }
+    });
+
+    res.json({
+      message: 'Email sent successfully',
+      data: updatedMessage
+    });
+
+  } catch (error: any) {
+    console.error('Error sending email:', error);
+    console.error('Error response:', error.response?.data);
+    console.error('Error status:', error.code);
+    
+    // Update message status to FAILED if it's a SendGrid error
+    if (error.response) {
+      await prisma.message.update({
+        where: { id: messageId },
+        data: { status: 'FAILED' }
+      });
+    }
+
+    res.status(500).json({ 
+      error: 'Failed to send email',
+      details: error.response?.body?.errors || error.message,
+      statusCode: error.code,
+      fullError: error.response?.data
+    });
+  }
+});
+
+// Test SendGrid connection
+router.post('/test-sendgrid', async (req, res) => {
+  try {
+    console.log('Testing SendGrid connection...');
+    console.log('API Key configured:', process.env.SENDGRID_API_KEY ? 'Yes' : 'No');
+    
+    const testEmail = {
+      to: 'ikram.akram@xcorebit.com',
+      from: 'xeetest786@gmail.com',
+      subject: 'Test Email from Neda Backend',
+      text: 'This is a test email to verify SendGrid is working.',
+      html: '<p>This is a test email to verify SendGrid is working.</p>'
+    };
+
+    await sgMail.send(testEmail);
+    res.json({ message: 'Test email sent successfully!' });
+  } catch (error: any) {
+    console.error('SendGrid test error:', error);
+    res.status(500).json({ 
+      error: 'SendGrid test failed',
+      details: error.response?.body?.errors || error.message,
+      statusCode: error.code
+    });
   }
 });
 
