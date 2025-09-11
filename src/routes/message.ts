@@ -252,28 +252,28 @@ router.post('/message/:messageId/send', async (req, res) => {
   }
 });
 
-// Test SendGrid connection
-router.post('/test-sendgrid', async (req, res) => {
-  try {
-    console.log('Testing SendGrid connection...');
-    console.log('API Key configured:', process.env.SENDGRID_API_KEY ? 'Yes' : 'No');
-    
-    const testEmail = {
-      to: 'ikram.akram@xcorebit.com',
-      from: 'xeetest786@gmail.com',
-      subject: 'Test Email from Neda Backend',
-      text: 'This is a test email to verify SendGrid is working.',
-      html: '<p>This is a test email to verify SendGrid is working.</p>'
-    };
+router.get('/message/:messageId', async (req, res) => {
+  const { messageId } = req.params;
+  console.log('Received message show request for messageId:', messageId);
 
-    await sgMail.send(testEmail);
-    res.json({ message: 'Test email sent successfully!' });
+  try {
+    const message = await prisma.message.findUnique({
+      where: { id: messageId }
+    });
+
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    res.json({
+      message
+    });
+
   } catch (error: any) {
-    console.error('SendGrid test error:', error);
+    console.error('Error fetching message:', error);
     res.status(500).json({ 
-      error: 'SendGrid test failed',
-      details: error.response?.body?.errors || error.message,
-      statusCode: error.code
+      error: 'Failed to fetch message',
+      details: error.message
     });
   }
 });
