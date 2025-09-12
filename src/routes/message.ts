@@ -199,7 +199,7 @@ router.post('/message/:messageId/send', async (req, res) => {
     // Prepare email data
     const emailData = {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
-      from: 'ikram.akram@xcorebit.com',
+      from: 'xeetest786@gmail.com',
       subject: message.subject,
       text: message.body,
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -212,7 +212,7 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     console.log('Sending email:', {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
-      from: message.from,
+      from: 'xeetest786@gmail.com',
       subject: message.subject
     });
 
