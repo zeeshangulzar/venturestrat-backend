@@ -89,6 +89,11 @@ router.get('/user/:userId/details', async (req, res) => {
               },
             },
           },
+          orderBy: {
+            investor: {
+              createdAt: 'desc',
+            },
+          },
         },
       },
     });
@@ -98,7 +103,11 @@ router.get('/user/:userId/details', async (req, res) => {
     }
 
     // Extract just the investors from the shortlists
-    const shortlistedInvestors = user.shortlists.map(shortlist => shortlist.investor);
+    const shortlistedInvestors = user.shortlists.map(shortlist => ({
+      ...shortlist.investor,
+      status: shortlist.status,
+      shortlistId: shortlist.id
+    }));
 
     res.json({
       user: {
@@ -112,6 +121,26 @@ router.get('/user/:userId/details', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching user details:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.put('/shortlist/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  try {
+    const updatedShortlist = await prisma.shortlist.update({
+      where: { id },
+      data: { status },
+    });
+
+    res.json({
+      message: 'Shortlist status updated successfully',
+      shortlist: updatedShortlist,
+    });
+  } catch (error) {
+    console.error('Error updating shortlist status:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
