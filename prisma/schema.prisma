@@ -24,6 +24,14 @@ enum MessageStatus {
   FAILED
 }
 
+enum ShortlistStatus {
+  TARGET
+  CONTACTED
+  NO_RESPONSE
+  NOT_INTERESTED
+  INTERESTED
+}
+
 /* =========================
    Core Models
    ========================= */
@@ -167,6 +175,7 @@ model Shortlist {
   investorId String   @map("investor_id")
   user       User     @relation(fields: [userId], references: [id])
   investor   Investor @relation(fields: [investorId], references: [id])
+  status     ShortlistStatus @default(TARGET)
 
   @@unique([userId, investorId])
   @@index([userId])
