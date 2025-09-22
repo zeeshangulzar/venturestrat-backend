@@ -184,7 +184,10 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     // Get the message
     const message = await prisma.message.findUnique({
-      where: { id: messageId }
+      where: { id: messageId },
+      include: {
+        user: true,
+      },
     });
 
     if (!message) {
@@ -199,7 +202,11 @@ router.post('/message/:messageId/send', async (req, res) => {
     // Prepare email data
     const emailData = {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
-      from: 'xeetest786@gmail.com',
+      from: {
+        email: 'xeetest786@gmail.com',
+        name: message.user.firstname + ' ' + message.user.lastname
+      },
+      replyTo: message.from,
       subject: message.subject,
       text: message.body,
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
