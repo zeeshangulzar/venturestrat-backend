@@ -203,14 +203,13 @@ router.post('/message/:messageId/send', async (req, res) => {
     const emailData = {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
       from: {
-        email: 'xeetest786@gmail.com',
+        email: 'zeeshan.gulzar@xcorebit.com',
         name: message.user.firstname + ' ' + message.user.lastname
       },
       replyTo: message.from,
       subject: message.subject,
       text: message.body,
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-               <h2>${message.subject}</h2>
                <div style="margin-top: 20px;">
                  ${message.body.replace(/\n/g, '<br>')}
                </div>
@@ -219,7 +218,7 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     console.log('Sending email:', {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
-      from: 'xeetest786@gmail.com',
+      from: 'zeeshan.gulzar@xcorebit.com',
       subject: message.subject
     });
 
