@@ -34,13 +34,34 @@ router.post('/createOrFindUser', async (req, res) => {
 // GET /users - Get all users
 router.get('/users', async (req, res) => {
   try {
-    const users = await prisma.user.findMany({
-      orderBy: {
-        createdAt: 'desc'
-      },
-    });
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const skip = (page - 1) * limit;
 
-    res.json(users);
+    const [users, totalCount] = await Promise.all([
+      prisma.user.findMany({
+        orderBy: {
+          createdAt: 'desc'
+        },
+        skip,
+        take: limit,
+      }),
+      prisma.user.count()
+    ]);
+
+    const totalPages = Math.ceil(totalCount / limit);
+    
+    res.json({
+      users,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
   } catch (error) {
     console.error('Error fetching users:', error);
     res.status(500).json({ error: 'Internal Server Error' });
