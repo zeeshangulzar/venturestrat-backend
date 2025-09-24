@@ -200,6 +200,9 @@ router.post('/message/:messageId/send', async (req, res) => {
     }
 
     // Prepare email data
+    let cleanBody = message.body.replace(/<p><br><\/p>/g, '<span style="display:block; height:8px;"></span>');
+    cleanBody = cleanBody.replace(/<p>/g, '<p style="margin: 0;">');
+
     const emailData = {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
       from: {
@@ -209,17 +212,20 @@ router.post('/message/:messageId/send', async (req, res) => {
       replyTo: message.from,
       subject: message.subject,
       text: message.body,
-      html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-               <div style="margin-top: 20px;">
-                 ${message.body.replace(/\n/g, '<br>')}
-               </div>
-             </div>`
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="margin-top: 20px;">
+            ${cleanBody}
+          </div>
+        </div>
+      `
     };
 
     console.log('Sending email:', {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
       from: 'zeeshan.gulzar@xcorebit.com',
-      subject: message.subject
+      subject: message.subject,
+      body: cleanBody
     });
 
     // Send email via SendGrid
