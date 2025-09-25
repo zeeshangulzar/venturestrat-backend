@@ -263,7 +263,7 @@ router.post('/message/:messageId/send', async (req, res) => {
     const emailData = {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
       from: {
-        email: 'zeeshan.gulzar@xcorebit.com',
+        email: 'info@venturestrat.ai',
         name: message.user.firstname + ' ' + message.user.lastname
       },
       replyTo: message.from,
