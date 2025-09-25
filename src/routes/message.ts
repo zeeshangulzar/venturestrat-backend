@@ -200,7 +200,11 @@ router.post('/message/:messageId/send', async (req, res) => {
     }
 
     // Prepare email data
-    let cleanBody = message.body.replace(/<p><br><\/p>/g, '<span style="display:block; height:8px;"></span>');
+    let cleanBody = message.body
+      .replace(/class="ql-font-monospace"/g, 'style="font-family: monospace;"')
+      .replace(/class="ql-font-serif"/g, 'style="font-family: serif;"')
+      .replace(/class="ql-font-sans-serif"/g, 'style="font-family: sans-serif;"');
+    cleanBody = cleanBody.replace(/<p><br><\/p>/g, '<span style="display:block; height:8px;"></span>');
     cleanBody = cleanBody.replace(/<p>/g, '<p style="margin: 0;">');
 
     const emailData = {
