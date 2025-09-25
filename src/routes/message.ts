@@ -213,8 +213,8 @@ router.post('/message/:messageId/send', async (req, res) => {
       subject: message.subject,
       text: message.body,
       html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-          <div style="margin-top: 20px;">
+        <div>
+          <div>
             ${cleanBody}
           </div>
         </div>
