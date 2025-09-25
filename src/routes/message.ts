@@ -201,9 +201,62 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     // Prepare email data
     let cleanBody = message.body
-      .replace(/class="ql-font-monospace"/g, 'style="font-family: monospace;"')
-      .replace(/class="ql-font-serif"/g, 'style="font-family: serif;"')
-      .replace(/class="ql-font-sans-serif"/g, 'style="font-family: sans-serif;"');
+      // Replace font classes with data-font markers
+      .replace(/class="ql-font-monospace"/g, 'data-font="monospace"')
+      .replace(/class="ql-font-serif"/g, 'data-font="serif"')
+      .replace(/class="ql-font-sans-serif"/g, 'data-font="sans-serif"')
+
+      // Replace size classes with data-size markers
+      .replace(/class="ql-size-small"/g, 'data-size="small"')
+      .replace(/class="ql-size-large"/g, 'data-size="large"')
+      .replace(/class="ql-size-huge"/g, 'data-size="huge"')
+
+      // Replace alignment classes with data-align markers
+      .replace(/class="ql-align-center"/g, 'data-align="center"')
+      .replace(/class="ql-align-right"/g, 'data-align="right"')
+      .replace(/class="ql-align-justify"/g, 'data-align="justify"');
+
+    // Merge data-font into style (preserve old styles)
+    cleanBody = cleanBody.replace(
+      /style="([^"]*)"([^>]*)data-font="([^"]+)"/g,
+      (match, existingStyles, rest, font) => {
+        const safeStyles = existingStyles.trim().replace(/;?$/, ';');
+        return `style="${safeStyles} font-family: ${font};"${rest}`;
+      }
+    );
+
+    // Merge data-size into style (preserve old styles)
+    cleanBody = cleanBody.replace(
+      /style="([^"]*)"([^>]*)data-size="([^"]+)"/g,
+      (match, existingStyles, rest, size) => {
+        const safeStyles = existingStyles.trim().replace(/;?$/, ';');
+        let fontSize = 'inherit';
+        if (size === 'small') fontSize = '0.75em';
+        if (size === 'large') fontSize = '1.5em';
+        if (size === 'huge') fontSize = '2.5em';
+        return `style="${safeStyles} font-size: ${fontSize};"${rest}`;
+      }
+    );
+
+    // Merge data-align into style (preserve old styles)
+    cleanBody = cleanBody.replace(
+      /style="([^"]*)"([^>]*)data-align="([^"]+)"/g,
+      (match, existingStyles, rest, align) => {
+        const safeStyles = existingStyles.trim().replace(/;?$/, ';');
+        return `style="${safeStyles} text-align: ${align};"${rest}`;
+      }
+    );
+
+    // Cleanup any leftover data-* attributes without styles
+    cleanBody = cleanBody
+      .replace(/data-font="([^"]+)"/g, 'style="font-family: $1;"')
+      .replace(/data-size="small"/g, 'style="font-size: 0.75em;"')
+      .replace(/data-size="large"/g, 'style="font-size: 1.5em;"')
+      .replace(/data-size="huge"/g, 'style="font-size: 2.5em;"')
+      .replace(/data-align="center"/g, 'style="text-align: center;"')
+      .replace(/data-align="right"/g, 'style="text-align: right;"')
+      .replace(/data-align="justify"/g, 'style="text-align: justify;"');
+
     cleanBody = cleanBody.replace(/<p><br><\/p>/g, '<span style="display:block; height:8px;"></span>');
     cleanBody = cleanBody.replace(/<p>/g, '<p style="margin: 0;">');
 
