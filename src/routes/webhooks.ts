@@ -100,7 +100,8 @@ router.post('/webhooks/clerk', async (req, res) => {
           const existingUser = await prisma.user.findUnique({
             where: { id: id },
             include: {
-              shortlists: true
+              shortlists: true,
+              messages: true
             }
           });
           
@@ -109,15 +110,21 @@ router.post('/webhooks/clerk', async (req, res) => {
             return;
           }
           
-          console.log(`Found user ${id} with ${existingUser.shortlists.length} shortlists`);
+          console.log(`Found user ${id} with ${existingUser.shortlists.length} shortlists and ${existingUser.messages.length} messages`);
           
-          // First delete all shortlists associated with this user
+          // Delete all messages associated with this user first
+          const deletedMessages = await prisma.message.deleteMany({
+            where: { userId: id }
+          });
+          console.log(`Deleted ${deletedMessages.count} messages for user: ${id}`);
+          
+          // Then delete all shortlists associated with this user
           const deletedShortlists = await prisma.shortlist.deleteMany({
             where: { userId: id }
           });
           console.log(`Deleted ${deletedShortlists.count} shortlists for user: ${id}`);
 
-          // Then delete the user
+          // Finally delete the user
           const deletedUser = await prisma.user.delete({
             where: { id: id }
           });
@@ -129,14 +136,19 @@ router.post('/webhooks/clerk', async (req, res) => {
           if (error.code === 'P2025') {
             console.log(`User ${id} not found in database for deletion`);
           } else {
-            // For other errors, try to delete just the shortlists if user deletion fails
+            // For other errors, try to clean up associated data if user deletion fails
             try {
+              const deletedMessages = await prisma.message.deleteMany({
+                where: { userId: id }
+              });
+              console.log(`Cleaned up ${deletedMessages.count} orphaned messages for user: ${id}`);
+              
               const deletedShortlists = await prisma.shortlist.deleteMany({
                 where: { userId: id }
               });
               console.log(`Cleaned up ${deletedShortlists.count} orphaned shortlists for user: ${id}`);
-            } catch (shortlistError) {
-              console.error(`Error cleaning up shortlists for user ${id}:`, shortlistError);
+            } catch (cleanupError) {
+              console.error(`Error cleaning up associated data for user ${id}:`, cleanupError);
             }
           }
         }
