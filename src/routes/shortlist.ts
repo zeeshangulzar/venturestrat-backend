@@ -86,6 +86,9 @@ router.get('/user/:userId/details', async (req, res) => {
             investor: {
               include: {
                 emails: true,
+                messages: {
+                  where: { userId, status: 'DRAFT' }
+                }
               },
             },
           },
@@ -103,11 +106,17 @@ router.get('/user/:userId/details', async (req, res) => {
     }
 
     // Extract just the investors from the shortlists
-    const shortlistedInvestors = user.shortlists.map(shortlist => ({
-      ...shortlist.investor,
-      status: shortlist.status,
-      shortlistId: shortlist.id
-    }));
+    const shortlistedInvestors = user.shortlists.map(shortlist => {
+      const investor = shortlist.investor;
+      const { messages, ...restInvestor } = investor;
+
+      return {
+        ...restInvestor,
+        status: shortlist.status,
+        shortlistId: shortlist.id,
+        hasDraft: messages.length > 0,
+      };
+    });
 
     res.json({
       user: {
