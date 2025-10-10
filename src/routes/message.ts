@@ -287,7 +287,7 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     console.log('Sending email:', {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
-      from: 'zeeshan.gulzar@xcorebit.com',
+      from: 'info@venturestrat.ai',
       subject: message.subject,
       body: cleanBody
     });
