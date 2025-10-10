@@ -124,7 +124,7 @@ router.get('/investment-filters', async (req, res) => {
     const q = norm(typeof search === 'string' ? search : '');
 
     // Get all filter values without pagination or search filtering
-    const [allStages, allTypes, allMarkets, allPastInvestments] = await Promise.all([
+    const [allStages, allTypes, allMarkets] = await Promise.all([
       // ---- Stages: enum (no table) ----
       prisma.investor.findMany({
         distinct: ['stages'],
@@ -159,8 +159,7 @@ router.get('/investment-filters', async (req, res) => {
     res.json({
       stages: allStages,
       investmentTypes: allTypes,
-      investmentFocuses: allMarkets,
-      pastInvestments: allPastInvestments,
+      investmentFocuses: allMarkets
     });
   } catch (error) {
     console.error('Error fetching investment filters:', error);
