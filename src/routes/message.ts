@@ -271,9 +271,9 @@ router.post('/message/:messageId/send', async (req, res) => {
     const cleanBody = cleanEmailBody(message.body);
 
     const emailData = {
-      to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
+      to: Array.isArray(message.to) ? message.to : [message.to],
       ...(message.cc && message.cc.length > 0 && {
-        cc: message.cc.join(', ')
+        cc: message.cc
       }),
       from: {
         email: 'info@venturestrat.ai',
@@ -292,14 +292,17 @@ router.post('/message/:messageId/send', async (req, res) => {
     };
 
     console.log('Sending email:', {
-      to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
+      to: Array.isArray(message.to) ? message.to : [message.to],
       ...(message.cc && message.cc.length > 0 && {
-        cc: message.cc.join(', ')
+        cc: message.cc
       }),
       from: 'info@venturestrat.ai',
       subject: message.subject,
       body: cleanBody
     });
+    
+    console.log('CC recipients:', message.cc);
+    console.log('Email data for SendGrid:', JSON.stringify(emailData, null, 2));
 
     // Send email via SendGrid
     await sgMail.send(emailData);
