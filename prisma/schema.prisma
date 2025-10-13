@@ -191,6 +191,7 @@ model Message {
 
   status     MessageStatus @default(DRAFT)
   to         String[]      
+  cc         String[]      @default([])
   subject    String
   from       String
   body       String        

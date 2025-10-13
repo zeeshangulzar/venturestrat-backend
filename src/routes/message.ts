@@ -75,7 +75,7 @@ function cleanEmailBody(body: string): string {
 
 // 1. Create a new message
 router.post('/message', async (req, res) => {
-  const { userId, investorId, to, subject, from, body, status = 'DRAFT' } = req.body;
+  const { userId, investorId, to, cc, subject, from, body, status = 'DRAFT' } = req.body;
   console.log('Received create message request:', req.body);
 
   try {
@@ -101,17 +101,17 @@ router.post('/message', async (req, res) => {
       if (existing) {
         message = await prisma.message.update({
           where: { id: existing.id },
-          data: { to, subject, from, body }
+          data: { to, cc: Array.isArray(cc) ? cc : (cc ? [cc] : []), subject, from, body }
         });
       } else {
         message = await prisma.message.create({
-          data: { userId, investorId, to, subject, from, body, status: 'DRAFT' }
+          data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? [cc] : []), subject, from, body, status: 'DRAFT' }
         });
       }
     } else {
       // Always create new for SENT or FAILED
       message = await prisma.message.create({
-        data: { userId, investorId, to, subject, from, body, status }
+        data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? [cc] : []), subject, from, body, status }
       });
     }
 
@@ -126,7 +126,7 @@ router.post('/message', async (req, res) => {
 router.put('/message/:messageId', async (req, res) => {
     
   const { messageId } = req.params;
-  const { to, subject, from, body, status } = req.body;
+  const { to, cc, subject, from, body, status } = req.body;
   console.log('Received update message request:', req.body);
 
   try {
@@ -144,6 +144,9 @@ router.put('/message/:messageId', async (req, res) => {
       where: { id: messageId },
       data: {
         ...(to !== undefined && { to }),
+        ...(cc !== undefined && { 
+          cc: Array.isArray(cc) ? cc : (cc ? [cc] : [])
+        }),
         ...(subject !== undefined && { subject }),
         ...(from !== undefined && { from }),
         ...(body !== undefined && { body }),
@@ -269,6 +272,9 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     const emailData = {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
+      ...(message.cc && message.cc.length > 0 && {
+        cc: message.cc.join(', ')
+      }),
       from: {
         email: 'info@venturestrat.ai',
         name: message.user.firstname + ' ' + message.user.lastname
@@ -287,6 +293,9 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     console.log('Sending email:', {
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
+      ...(message.cc && message.cc.length > 0 && {
+        cc: message.cc.join(', ')
+      }),
       from: 'info@venturestrat.ai',
       subject: message.subject,
       body: cleanBody
