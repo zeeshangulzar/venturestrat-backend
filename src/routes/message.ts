@@ -77,6 +77,7 @@ function cleanEmailBody(body: string): string {
 router.post('/message', async (req, res) => {
   const { userId, investorId, to, cc, subject, from, body, status = 'DRAFT' } = req.body;
   console.log('Received create message request:', req.body);
+  console.log('CC field received:', cc, 'Type:', typeof cc);
 
   try {
     // Validate required fields
@@ -101,17 +102,18 @@ router.post('/message', async (req, res) => {
       if (existing) {
         message = await prisma.message.update({
           where: { id: existing.id },
-          data: { to, cc: Array.isArray(cc) ? cc : (cc ? [cc] : []), subject, from, body }
+          data: { to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body 
+          }
         });
       } else {
         message = await prisma.message.create({
-          data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? [cc] : []), subject, from, body, status: 'DRAFT' }
+          data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body, status: 'DRAFT' }
         });
       }
     } else {
       // Always create new for SENT or FAILED
       message = await prisma.message.create({
-        data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? [cc] : []), subject, from, body, status }
+        data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body,  status }
       });
     }
 
@@ -128,6 +130,7 @@ router.put('/message/:messageId', async (req, res) => {
   const { messageId } = req.params;
   const { to, cc, subject, from, body, status } = req.body;
   console.log('Received update message request:', req.body);
+  console.log('CC field received:', cc, 'Type:', typeof cc);
 
   try {
     // Check if message exists
@@ -145,7 +148,7 @@ router.put('/message/:messageId', async (req, res) => {
       data: {
         ...(to !== undefined && { to }),
         ...(cc !== undefined && { 
-          cc: Array.isArray(cc) ? cc : (cc ? [cc] : [])
+          cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : [])
         }),
         ...(subject !== undefined && { subject }),
         ...(from !== undefined && { from }),
