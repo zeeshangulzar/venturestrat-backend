@@ -301,6 +301,21 @@ router.post('/message/:messageId/send', async (req, res) => {
       data: { status: 'SENT' }
     });
 
+    // Update shortlist status to CONTACTED if not already contacted
+    const shortlist = await prisma.shortlist.findFirst({
+      where: {
+        userId: message.userId,
+        investorId: message.investorId
+      }
+    });
+
+    if (shortlist && shortlist.status !== 'CONTACTED') {
+      await prisma.shortlist.update({
+        where: { id: shortlist.id },
+        data: { status: 'CONTACTED' }
+      });
+    }
+
     res.json({
       message: 'Email sent successfully',
       data: updatedMessage
