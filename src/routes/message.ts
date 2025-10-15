@@ -1,12 +1,21 @@
 import { Router } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import sgMail from '@sendgrid/mail';
+import multer from 'multer';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 // Initialize SendGrid
 sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
+
+// Configure multer for handling file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+});
 
 // Function to clean email body for proper HTML formatting
 function cleanEmailBody(body: string): string {
@@ -240,7 +249,7 @@ router.get('/messages/sent/:userId', async (req, res) => {
 });
 
 // 5. Send message via email
-router.post('/message/:messageId/send', async (req, res) => {
+router.post('/message/:messageId/send', upload.any(), async (req, res) => {
   const { messageId } = req.params;
   console.log('Received send message request for messageId:', messageId);
 
@@ -252,6 +261,31 @@ router.post('/message/:messageId/send', async (req, res) => {
 
     console.log('SendGrid API Key configured:', process.env.SENDGRID_API_KEY ? 'Yes' : 'No');
     console.log('API Key length:', process.env.SENDGRID_API_KEY?.length);
+
+    // Parse FormData attachments
+    const attachments = [];
+    console.log('Processing attachments from FormData...');
+    
+    // Check if req.files has attachment files (from multer)
+    if (req.files && Array.isArray(req.files)) {
+      for (const file of req.files) {
+        // Only process files that are actual attachments (not other form fields)
+        if (file.fieldname.startsWith('attachment_') || file.fieldname === 'attachments') {
+          console.log(`Processing attachment:`, file.originalname, file.size, file.mimetype);
+          
+          // Convert to base64 for SendGrid
+          const base64Content = file.buffer.toString('base64');
+          attachments.push({
+            content: base64Content,
+            filename: file.originalname || 'attachment',
+            type: file.mimetype,
+            disposition: 'attachment'
+          });
+        }
+      }
+    }
+    
+    console.log(`Total attachments processed: ${attachments.length}`);
 
     // Get the message
     const message = await prisma.message.findUnique({
@@ -291,7 +325,8 @@ router.post('/message/:messageId/send', async (req, res) => {
             ${cleanBody}
           </div>
         </div>
-      `
+      `,
+      attachments: attachments
     };
 
     console.log('Sending email:', {

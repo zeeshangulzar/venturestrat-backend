@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from 'dotenv';
+import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
 import investorRoutes from './routes/investor.js';
 import userRoutes from './routes/user.js';
@@ -16,6 +17,14 @@ const port = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Configure multer for handling file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+});
 
 app.use('/api', investorRoutes); 
 app.use('/api', userRoutes);

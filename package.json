@@ -18,10 +18,12 @@
     "@faker-js/faker": "^9.9.0",
     "@prisma/client": "^6.13.0",
     "@sendgrid/mail": "^8.1.5",
+    "@types/multer": "^2.0.0",
     "cors": "^2.8.5",
     "country-state-city": "^3.2.1",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "svix": "^1.75.0"
   },
