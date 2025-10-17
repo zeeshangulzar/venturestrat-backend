@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
 import sgMail from '@sendgrid/mail';
 import multer from 'multer';
+import { google } from "googleapis";
+import { clerkClient } from '@clerk/clerk-sdk-node';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -17,6 +19,64 @@ const upload = multer({
   },
 });
 
+async function sendViaGmail(accessToken: string, message: any, attachments: any[]) {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: accessToken });
+
+  const gmail = google.gmail({ version: "v1", auth });
+  const cleanedBody = cleanEmailBody(message.body);
+
+  const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
+  const ccRecipients = Array.isArray(message.cc) ? message.cc : (message.cc ? [message.cc] : []);
+  const replyToAddress = message.replyTo || message.from;
+
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  const boundary = `mixed_${Date.now()}`;
+
+  const headerLines = [
+    `To: ${toRecipients.join(", ")}`,
+    ...(ccRecipients.length > 0 ? [`Cc: ${ccRecipients.join(", ")}`] : []),
+    `From: ${message.from}`,
+    ...(replyToAddress ? [`Reply-To: ${replyToAddress}`] : []),
+    `Subject: ${message.subject}`,
+  ];
+
+  const mimeParts: string[] = [];
+
+  if (hasAttachments) {
+    mimeParts.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, "", `--${boundary}`);
+    mimeParts.push('Content-Type: text/html; charset="UTF-8"');
+    mimeParts.push("Content-Transfer-Encoding: 7bit", "", cleanedBody, "");
+
+    for (const attachment of attachments) {
+      const filename = attachment.filename || "attachment";
+      const mimeType = attachment.type || "application/octet-stream";
+      mimeParts.push(`--${boundary}`);
+      mimeParts.push(`Content-Type: ${mimeType}; name="${filename}"`);
+      mimeParts.push("Content-Transfer-Encoding: base64");
+      mimeParts.push(`Content-Disposition: attachment; filename="${filename}"`, "");
+      mimeParts.push(attachment.content || "", "");
+    }
+
+    mimeParts.push(`--${boundary}--`, "");
+  } else {
+    mimeParts.push('Content-Type: text/html; charset="UTF-8"');
+    mimeParts.push("Content-Transfer-Encoding: 7bit", "", cleanedBody);
+  }
+
+  const rawMessage = [...headerLines, ...mimeParts].join("\r\n");
+
+  const encodedMessage = Buffer.from(rawMessage)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  return await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw: encodedMessage },
+  });
+}
 // Function to clean email body for proper HTML formatting
 function cleanEmailBody(body: string): string {
   let cleanBody = body
@@ -248,6 +308,40 @@ router.get('/messages/sent/:userId', async (req, res) => {
   }
 });
 
+router.get('/messages/answered/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    // Check if user exists
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get all sent messages for the user
+    const sentMessages = await prisma.message.findMany({
+      where: {
+        userId: userId,
+        status: 'ANSWERED'
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      }
+    });
+
+    res.json({
+      message: 'Sent messages retrieved successfully',
+      count: sentMessages.length,
+      data: sentMessages
+    });
+  } catch (error) {
+    console.error('Error fetching answered messages:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 // 5. Send message via email
 router.post('/message/:messageId/send', upload.any(), async (req, res) => {
   const { messageId } = req.params;
@@ -286,7 +380,6 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     }
     
     console.log(`Total attachments processed: ${attachments.length}`);
-
     // Get the message
     const message = await prisma.message.findUnique({
       where: { id: messageId },
@@ -304,46 +397,60 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       return res.status(400).json({ error: 'Message has already been sent' });
     }
 
+    const tokens = await clerkClient.users.getUserOauthAccessToken(
+      message.user.id,
+      "oauth_google"
+    );
+
     // Prepare email data
     const cleanBody = cleanEmailBody(message.body);
 
-    const emailData = {
-      to: Array.isArray(message.to) ? message.to : [message.to],
-      ...(message.cc && message.cc.length > 0 && {
-        cc: message.cc
-      }),
-      from: {
-        email: 'info@venturestrat.ai',
-        name: message.user.firstname + ' ' + message.user.lastname
-      },
-      replyTo: message.from,
-      subject: message.subject,
-      text: message.body,
-      html: `
-        <div>
+    if (tokens.data && tokens.data.length > 0) {
+      // --- Use Gmail API ---
+      const accessToken = tokens.data[0].token;
+      await sendViaGmail(accessToken, message, attachments);
+      console.log('Email sent via Gmail API');
+    } else {
+      // --- Fallback to SendGrid ---
+      const emailData = {
+        to: Array.isArray(message.to) ? message.to : [message.to],
+        ...(message.cc && message.cc.length > 0 && {
+          cc: message.cc
+        }),
+        from: {
+          email: 'info@venturestrat.ai',
+          name: message.user.firstname + ' ' + message.user.lastname
+        },
+        replyTo: message.from,
+        subject: message.subject,
+        text: message.body,
+        html: `
           <div>
-            ${cleanBody}
+            <div>
+              ${cleanBody}
+            </div>
           </div>
-        </div>
-      `,
-      attachments: attachments
-    };
+        `,
+        attachments: attachments
+      };
 
-    console.log('Sending email:', {
-      to: Array.isArray(message.to) ? message.to : [message.to],
-      ...(message.cc && message.cc.length > 0 && {
-        cc: message.cc
-      }),
-      from: 'info@venturestrat.ai',
-      subject: message.subject,
-      body: cleanBody
-    });
-    
-    console.log('CC recipients:', message.cc);
-    console.log('Email data for SendGrid:', JSON.stringify(emailData, null, 2));
+      console.log('Sending email via SendGrid:', {
+        to: Array.isArray(message.to) ? message.to : [message.to],
+        ...(message.cc && message.cc.length > 0 && {
+          cc: message.cc
+        }),
+        from: 'info@venturestrat.ai',
+        subject: message.subject,
+        body: cleanBody
+      });
+      
+      console.log('CC recipients:', message.cc);
+      console.log('Email data for SendGrid:', JSON.stringify(emailData, null, 2));
 
-    // Send email via SendGrid
-    await sgMail.send(emailData);
+      // Send email via SendGrid
+      await sgMail.send(emailData);
+      console.log('Email sent via SendGrid');
+    }
 
     // Update message status to SENT
     const updatedMessage = await prisma.message.update({
