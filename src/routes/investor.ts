@@ -25,12 +25,11 @@ router.get('/investors', async (req, res) => {
     // ---- Where clause built for new schema ----
     const whereClause: Prisma.InvestorWhereInput = {};
 
-    // Search across name and companyName (case-insensitive contains)
+    // Search across name (case-insensitive contains)
     if (typeof search === 'string' && search.trim() !== '') {
       const q = search.trim();
       whereClause.OR = [
-        { name:        { contains: q, mode: Prisma.QueryMode.insensitive } },
-        { companyName: { contains: q, mode: Prisma.QueryMode.insensitive } },
+        { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
       ];
     }
 
