@@ -1094,6 +1094,20 @@ router.post('/webhooks/gmail-notification', async (req, res) => {
             }
           });
 
+          const shortlist = await prisma.shortlist.findFirst({
+            where: {
+              userId: answeredMessage.userId,
+              investorId: answeredMessage.investorId
+            }
+          });
+
+          if (shortlist && shortlist.status !== 'INTERESTED') {
+            await prisma.shortlist.update({
+              where: { id: shortlist.id },
+              data: { status: 'INTERESTED' }
+            });
+          }
+
           console.log('ANSWERED message created successfully via fallback:', {
             id: answeredMessage.id,
             subject: answeredMessage.subject,
