@@ -1,9 +1,18 @@
 // routes/user.ts
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// Configure multer for logo uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit for logos
+  },
+});
 
 router.post('/createOrFindUser', async (req, res) => {
   const { userId, email } = req.body;
@@ -71,7 +80,7 @@ router.get('/users', async (req, res) => {
 // PUT /user/:userId - Update user information
 router.put('/user/:userId', async (req, res) => {
   const { userId } = req.params;
-  const { firstname, lastname, role, onboardingComplete, publicMetaData } = req.body;
+  const { firstname, lastname, role, onboardingComplete, publicMetaData, companyWebsite, companyLogo } = req.body;
   console.log('Update request body:', req.body);
 
   try {
@@ -93,6 +102,8 @@ router.put('/user/:userId', async (req, res) => {
         ...(role !== undefined && { role }),
         ...(onboardingComplete !== undefined && { onboardingComplete }),
         ...(publicMetaData !== undefined && { publicMetaData }),
+        ...(companyWebsite !== undefined && { companyWebsite }),
+        ...(companyLogo !== undefined && { companyLogo }),
       },
     });
 
@@ -106,6 +117,8 @@ router.put('/user/:userId', async (req, res) => {
         role: updatedUser.role,
         onboardingComplete: updatedUser.onboardingComplete,
         publicMetaData: updatedUser.publicMetaData,
+        companyWebsite: updatedUser.companyWebsite,
+        companyLogo: updatedUser.companyLogo,
         createdAt: updatedUser.createdAt,
       },
     });
@@ -144,6 +157,8 @@ router.get('/user/:userId', async (req, res) => {
         role: user.role,
         onboardingComplete: user.onboardingComplete,
         publicMetaData: user.publicMetaData,
+        companyWebsite: user.companyWebsite,
+        companyLogo: user.companyLogo,
         createdAt: user.createdAt,
       },
       shortlistedInvestors: user.shortlists.map(shortlist => shortlist.investor),
@@ -151,6 +166,60 @@ router.get('/user/:userId', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /user/upload-logo - Upload company logo
+router.post('/user/upload-logo', upload.single('logo'), async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    // Check if user exists
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!existingUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Handle file upload (assuming multer middleware is set up)
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const file = req.file;
+    
+    // Validate file type
+    if (!file.mimetype.startsWith('image/')) {
+      return res.status(400).json({ error: 'File must be an image' });
+    }
+
+    // Upload to B2
+    const { uploadPublicFile, getSignedUrlForAsset } = await import('../services/storage');
+    const fileKey = `logos/logo-${Date.now()}-${file.originalname}`;
+    
+    await uploadPublicFile(file.buffer, fileKey, file.mimetype);
+    const logoUrl = await getSignedUrlForAsset(fileKey);
+
+    // Update user with new logo URL
+    await prisma.user.update({
+      where: { id: userId },
+      data: { companyLogo: logoUrl }
+    });
+
+    res.json({
+      message: 'Logo uploaded successfully',
+      logoUrl
+    });
+
+  } catch (error) {
+    console.error('Error uploading logo:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

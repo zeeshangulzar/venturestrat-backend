@@ -45,6 +45,8 @@ model User {
   role               String      @default("moderator")
   onboardingComplete Boolean     @default(false)
   publicMetaData     Json?
+  companyWebsite     String?     // Company website URL
+  companyLogo        String?     // B2 URL to company logo
   createdAt          DateTime    @default(now())
   shortlists         Shortlist[]
   messages           Message[]
@@ -196,6 +198,7 @@ model Message {
   subject    String
   from       String
   body       String        
+  attachments Json?        @default("[]") // Store B2 file metadata
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 }

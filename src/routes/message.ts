@@ -5,6 +5,16 @@ import multer from 'multer';
 import { google } from "googleapis";
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { load } from 'cheerio';
+import { uploadFile, getFileUrl } from '../services/storage';
+
+// Utility function to format file sizes
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -20,19 +30,29 @@ const upload = multer({
   },
 });
 
-async function sendViaGmail(accessToken: string, message: any, attachments: any[]) {
+async function sendViaGmail(accessToken: string, message: any, attachmentLinks: any[]) {
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: accessToken });
 
   const gmail = google.gmail({ version: "v1", auth });
-  const cleanedBody = cleanEmailBody(message.body);
+  let cleanedBody = cleanEmailBody(message.body);
 
   const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
   const ccRecipients = Array.isArray(message.cc) ? message.cc : (message.cc ? [message.cc] : []);
   const replyToAddress = message.replyTo || message.from;
 
-  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
-  const boundary = `mixed_${Date.now()}`;
+  // Add attachment download links to email content
+  if (attachmentLinks.length > 0) {
+    const attachmentLinksHtml = attachmentLinks.map(att => 
+      `<p>📎 ${att.filename} (${formatFileSize(att.size)}) - <a href="${att.url}">Download</a></p>`
+    ).join('');
+    
+    // Add simple attachment section to the email body
+    cleanedBody += `
+      <p><strong>Attachments:</strong></p>
+      ${attachmentLinksHtml}
+    `;
+  }
 
   const headerLines = [
     `To: ${toRecipients.join(", ")}`,
@@ -42,30 +62,18 @@ async function sendViaGmail(accessToken: string, message: any, attachments: any[
     `Subject: ${message.subject}`,
   ];
 
-  const mimeParts: string[] = [];
+  // Use simple HTML email without attachments (download links are in the content)
+  const emailContent = [
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    cleanedBody
+  ];
 
-  if (hasAttachments) {
-    mimeParts.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, "", `--${boundary}`);
-    mimeParts.push('Content-Type: text/html; charset="UTF-8"');
-    mimeParts.push("Content-Transfer-Encoding: 7bit", "", cleanedBody, "");
-
-    for (const attachment of attachments) {
-      const filename = attachment.filename || "attachment";
-      const mimeType = attachment.type || "application/octet-stream";
-      mimeParts.push(`--${boundary}`);
-      mimeParts.push(`Content-Type: ${mimeType}; name="${filename}"`);
-      mimeParts.push("Content-Transfer-Encoding: base64");
-      mimeParts.push(`Content-Disposition: attachment; filename="${filename}"`, "");
-      mimeParts.push(attachment.content || "", "");
-    }
-
-    mimeParts.push(`--${boundary}--`, "");
-  } else {
-    mimeParts.push('Content-Type: text/html; charset="UTF-8"');
-    mimeParts.push("Content-Transfer-Encoding: 7bit", "", cleanedBody);
-  }
-
-  const rawMessage = [...headerLines, ...mimeParts].join("\r\n");
+  const rawMessage = [...headerLines, ...emailContent].join("\r\n");
+  
+  console.log('Gmail email content with attachments:', cleanedBody);
+  console.log('Gmail attachment links:', attachmentLinks);
 
   const encodedMessage = Buffer.from(rawMessage)
     .toString("base64")
@@ -605,7 +613,8 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     console.log('API Key length:', process.env.SENDGRID_API_KEY?.length);
 
     // Parse FormData attachments
-    const attachments = [];
+    const emailAttachments = []; // For email sending (base64 content)
+    const b2Attachments = []; // Store B2 file metadata for database
     console.log('Processing attachments from FormData...');
     
     // Check if req.files has attachment files (from multer)
@@ -615,19 +624,37 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
         if (file.fieldname.startsWith('attachment_') || file.fieldname === 'attachments') {
           console.log(`Processing attachment:`, file.originalname, file.size, file.mimetype);
           
-          // Convert to base64 for SendGrid
-          const base64Content = file.buffer.toString('base64');
-          attachments.push({
-            content: base64Content,
+          // Upload to B2 storage
+          const fileKey = `attachments/${Date.now()}-${file.originalname}`;
+          await uploadFile(file.buffer, fileKey, file.mimetype);
+          
+          // Store B2 file metadata for database (URLs only)
+          const b2FileInfo = {
+            key: fileKey,
             filename: file.originalname || 'attachment',
             type: file.mimetype,
-            disposition: 'attachment'
+            size: file.size,
+            url: await getFileUrl(fileKey, 86400) // 24 hours expiry
+          };
+          b2Attachments.push(b2FileInfo);
+          
+          console.log(`B2 file uploaded: ${fileKey}`);
+          console.log(`B2 URL generated: ${b2FileInfo.url}`);
+          
+          // For email sending, we'll include download links instead of base64 content
+          // This is more efficient and avoids email size limits
+          emailAttachments.push({
+            filename: file.originalname || 'attachment',
+            type: file.mimetype,
+            url: b2FileInfo.url, // Use B2 URL instead of base64
+            size: file.size
           });
         }
       }
     }
     
-    console.log(`Total attachments processed: ${attachments.length}`);
+    console.log(`Total attachments processed: ${emailAttachments.length}`);
+    console.log('Email attachments for sending:', JSON.stringify(emailAttachments, null, 2));
     // Get the message
     const message = await prisma.message.findUnique({
       where: { id: messageId },
@@ -658,13 +685,33 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     console.log('Detected Google Fonts:', googleFonts);
     console.log('Clean body for font detection:', cleanBody.substring(0, 500) + '...');
     
-    // Generate HTML with proper font support
-    const htmlContent = generateEmailHTML(cleanBody, googleFonts);
+    // Generate HTML with proper font support and attachment links
+    let htmlContent = generateEmailHTML(cleanBody, googleFonts);
+    
+    // Add attachment download links to email content
+    if (emailAttachments.length > 0) {
+      const attachmentLinks = emailAttachments.map(att => 
+        `<p>📎 ${att.filename} (${formatFileSize(att.size)}) - <a href="${att.url}">Download</a></p>`
+      ).join('');
+      
+      // Add simple attachment section
+      const attachmentSection = `
+        <p><strong>Attachments:</strong></p>
+        ${attachmentLinks}
+      `;
+      
+      // Try to insert before </body>, if not found, append to the end
+      if (htmlContent.includes('</body>')) {
+        htmlContent = htmlContent.replace('</body>', `${attachmentSection}</body>`);
+      } else {
+        htmlContent += attachmentSection;
+      }
+    }
 
     if (tokens.data && tokens.data.length > 0) {
       // --- Use Gmail API ---
       const accessToken = tokens.data[0].token;
-      await sendViaGmail(accessToken, message, attachments);
+      await sendViaGmail(accessToken, message, emailAttachments);
       console.log('Email sent via Gmail API');
     } else {
       // --- Fallback to SendGrid ---
@@ -687,7 +734,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
             </div>
           </div>
         `,
-        attachments: attachments
+        // No attachments - using download links instead
       };
 
       console.log('Sending email via SendGrid:', {
@@ -708,10 +755,15 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       console.log('Email sent via SendGrid');
     }
 
-    // Update message status to SENT
+    // Update message status to SENT and store B2 attachment metadata
+    const updateData: any = { 
+      status: 'SENT',
+      attachments: b2Attachments // Store B2 file metadata
+    };
+    
     const updatedMessage = await prisma.message.update({
       where: { id: messageId },
-      data: { status: 'SENT' }
+      data: updateData
     });
 
     // Update shortlist status to CONTACTED if not already contacted
