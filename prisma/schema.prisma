@@ -22,6 +22,7 @@ enum MessageStatus {
   DRAFT
   SENT
   FAILED
+  ANSWERED
 }
 
 enum ShortlistStatus {

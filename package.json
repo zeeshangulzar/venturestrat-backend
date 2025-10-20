@@ -24,6 +24,7 @@
     "country-state-city": "^3.2.1",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "googleapis": "^163.0.0",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "svix": "^1.75.0"
