@@ -241,6 +241,118 @@ const isInsufficientScopeError = (error: any): boolean => {
   );
 };
 
+// Helper function to create ANSWERED message and update shortlist
+const createAnsweredMessage = async (params: {
+  originalMessage: any;
+  senderEmail: string;
+  subject: string;
+  body: string;
+  recipientCandidates: string[];
+  ccAddresses: string[];
+  emailAddress?: string;
+  isFallback?: boolean;
+}) => {
+  const {
+    originalMessage,
+    senderEmail,
+    subject,
+    body,
+    recipientCandidates,
+    ccAddresses,
+    emailAddress,
+    isFallback = false
+  } = params;
+
+  console.log(`Found SENT message via ${isFallback ? 'fallback' : 'primary'} matching, checking for duplicate ANSWERED message:`, {
+    originalMessageId: originalMessage.id,
+    originalSubject: originalMessage.subject,
+    replyFrom: senderEmail,
+    replySubject: subject
+  });
+
+  // Check if an ANSWERED message already exists for this conversation
+  const existingAnsweredMessage = await prisma.message.findFirst({
+    where: {
+      userId: originalMessage.userId,
+      investorId: originalMessage.investorId,
+      status: MessageStatus.ANSWERED,
+      from: senderEmail,
+      subject: subject,
+      body: body,
+      // Add time constraint for fallback matching
+      ...(isFallback && {
+        createdAt: {
+          gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Within the last 24 hours
+        }
+      })
+    }
+  });
+
+  if (existingAnsweredMessage) {
+    console.log(`ANSWERED message already exists for this conversation ${isFallback ? '(fallback)' : ''}, skipping duplicate creation:`, {
+      existingAnsweredMessageId: existingAnsweredMessage.id,
+      subject: existingAnsweredMessage.subject,
+      from: existingAnsweredMessage.from
+    });
+
+    return {
+      success: true,
+      message: `Gmail notification processed - ANSWERED message already exists ${isFallback ? '(fallback)' : ''}`,
+      messageId: existingAnsweredMessage.id,
+      originalMessageId: originalMessage.id,
+      skipped: true
+    };
+  }
+
+  const answeredRecipients = recipientCandidates.length > 0
+    ? Array.from(new Set(recipientCandidates.map(candidate => candidate.toLowerCase())))
+    : (emailAddress ? [emailAddress.toLowerCase()] : []);
+
+  // Create a new ANSWERED message
+  const answeredMessage = await prisma.message.create({
+    data: {
+      userId: originalMessage.userId,
+      investorId: originalMessage.investorId,
+      status: MessageStatus.ANSWERED,
+      to: answeredRecipients,
+      cc: ccAddresses.length > 0 ? ccAddresses : [],
+      subject: subject,
+      from: senderEmail,
+      body: body
+    }
+  });
+
+  // Update shortlist status to INTERESTED
+  const shortlist = await prisma.shortlist.findFirst({
+    where: {
+      userId: answeredMessage.userId,
+      investorId: answeredMessage.investorId
+    }
+  });
+
+  if (shortlist && shortlist.status !== 'INTERESTED') {
+    await prisma.shortlist.update({
+      where: { id: shortlist.id },
+      data: { status: 'INTERESTED' }
+    });
+  }
+
+  console.log(`ANSWERED message created successfully ${isFallback ? 'via fallback' : ''}:`, {
+    id: answeredMessage.id,
+    subject: answeredMessage.subject,
+    from: answeredMessage.from,
+    status: answeredMessage.status,
+    shortlist: shortlist?.status
+  });
+
+  return {
+    success: true,
+    message: `Gmail notification processed - ANSWERED message created ${isFallback ? 'via fallback matching' : ''}`,
+    messageId: answeredMessage.id,
+    originalMessageId: originalMessage.id
+  };
+};
+
 // Function to resubscribe Gmail watch when scope errors occur
 const resubscribeGmailWatch = async (userId: string): Promise<boolean> => {
   try {
@@ -936,73 +1048,19 @@ router.post('/webhooks/gmail-notification', async (req, res) => {
       });
 
       if (existingSentMessage) {
-        console.log('Found existing SENT message, checking for duplicate ANSWERED message:', {
-          originalMessageId: existingSentMessage.id,
-          originalSubject: existingSentMessage.subject,
-          replyFrom: sender,
-          replySubject: subject
+        const result = await createAnsweredMessage({
+          originalMessage: existingSentMessage,
+          senderEmail,
+          subject,
+          body,
+          recipientCandidates,
+          ccAddresses,
+          emailAddress,
+          isFallback: false
         });
 
-        // Check if an ANSWERED message already exists for this conversation
-        const existingAnsweredMessage = await prisma.message.findFirst({
-          where: {
-            userId: existingSentMessage.userId,
-            investorId: existingSentMessage.investorId,
-            status: MessageStatus.ANSWERED,
-            from: senderEmail,
-            subject: subject,
-            body: body
-          }
-        });
-
-        if (existingAnsweredMessage) {
-          console.log('ANSWERED message already exists for this conversation, skipping duplicate creation:', {
-            existingAnsweredMessageId: existingAnsweredMessage.id,
-            subject: existingAnsweredMessage.subject,
-            from: existingAnsweredMessage.from
-          });
-
-          res.status(200).json({ 
-            success: true, 
-            message: 'Gmail notification processed - ANSWERED message already exists',
-            messageId: existingAnsweredMessage.id,
-            originalMessageId: existingSentMessage.id,
-            skipped: true
-          });
-          return;
-        }
-
-        const answeredRecipients = recipientCandidates.length > 0
-          ? Array.from(new Set(recipientCandidates.map(candidate => candidate.toLowerCase())))
-          : (emailAddress ? [emailAddress.toLowerCase()] : []);
-
-        // Create a new ANSWERED message
-        const answeredMessage = await prisma.message.create({
-          data: {
-            userId: existingSentMessage.userId,
-            investorId: existingSentMessage.investorId,
-            status: MessageStatus.ANSWERED,
-            to: answeredRecipients,
-            cc: ccAddresses.length > 0 ? ccAddresses : [],
-            subject: subject,
-            from: senderEmail,
-            body: body
-          }
-        });
-
-        console.log('ANSWERED message created successfully:', {
-          id: answeredMessage.id,
-          subject: answeredMessage.subject,
-          from: answeredMessage.from,
-          status: answeredMessage.status
-        });
-
-        res.status(200).json({ 
-          success: true, 
-          message: 'Gmail notification processed - ANSWERED message created',
-          messageId: answeredMessage.id,
-          originalMessageId: existingSentMessage.id
-        });
+        res.status(200).json(result);
+        return;
 
       } else {
         // Fallback: Try to find a SENT message with just subject matching (for cases where email addresses don't match exactly)
@@ -1037,90 +1095,19 @@ router.post('/webhooks/gmail-notification', async (req, res) => {
         });
 
         if (fallbackSentMessage) {
-          console.log('Found SENT message via fallback matching, checking for duplicate ANSWERED message:', {
-            originalMessageId: fallbackSentMessage.id,
-            originalSubject: fallbackSentMessage.subject,
-            replyFrom: sender,
-            replySubject: subject
+          const result = await createAnsweredMessage({
+            originalMessage: fallbackSentMessage,
+            senderEmail,
+            subject,
+            body,
+            recipientCandidates,
+            ccAddresses,
+            emailAddress,
+            isFallback: true
           });
 
-          // Check if an ANSWERED message already exists for this conversation
-          const existingAnsweredMessage = await prisma.message.findFirst({
-            where: {
-              userId: fallbackSentMessage.userId,
-              investorId: fallbackSentMessage.investorId,
-              status: MessageStatus.ANSWERED,
-              from: senderEmail,
-              subject: subject,
-              body: body,
-              createdAt: {
-                gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Within the last 24 hours
-              }
-            }
-          });
-
-          if (existingAnsweredMessage) {
-            console.log('ANSWERED message already exists for this conversation (fallback), skipping duplicate creation:', {
-              existingAnsweredMessageId: existingAnsweredMessage.id,
-              subject: existingAnsweredMessage.subject,
-              from: existingAnsweredMessage.from
-            });
-
-            res.status(200).json({ 
-              success: true, 
-              message: 'Gmail notification processed - ANSWERED message already exists (fallback)',
-              messageId: existingAnsweredMessage.id,
-              originalMessageId: fallbackSentMessage.id,
-              skipped: true
-            });
-            return;
-          }
-
-          const answeredRecipients = recipientCandidates.length > 0
-            ? Array.from(new Set(recipientCandidates.map(candidate => candidate.toLowerCase())))
-            : (emailAddress ? [emailAddress.toLowerCase()] : []);
-
-          // Create a new ANSWERED message
-          const answeredMessage = await prisma.message.create({
-            data: {
-              userId: fallbackSentMessage.userId,
-              investorId: fallbackSentMessage.investorId,
-              status: MessageStatus.ANSWERED,
-              to: answeredRecipients,
-              cc: ccAddresses.length > 0 ? ccAddresses : [],
-              subject: subject,
-              from: senderEmail,
-              body: body
-            }
-          });
-
-          const shortlist = await prisma.shortlist.findFirst({
-            where: {
-              userId: answeredMessage.userId,
-              investorId: answeredMessage.investorId
-            }
-          });
-
-          if (shortlist && shortlist.status !== 'INTERESTED') {
-            await prisma.shortlist.update({
-              where: { id: shortlist.id },
-              data: { status: 'INTERESTED' }
-            });
-          }
-
-          console.log('ANSWERED message created successfully via fallback:', {
-            id: answeredMessage.id,
-            subject: answeredMessage.subject,
-            from: answeredMessage.from,
-            status: answeredMessage.status
-          });
-
-          res.status(200).json({ 
-            success: true, 
-            message: 'Gmail notification processed - ANSWERED message created via fallback matching',
-            messageId: answeredMessage.id,
-            originalMessageId: fallbackSentMessage.id
-          });
+          res.status(200).json(result);
+          return;
         } else {
           console.log('No matching SENT message found for this Gmail notification:', {
             subject,
