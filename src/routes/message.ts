@@ -140,11 +140,6 @@ const FONT_FAMILY_MAP: Record<string, string> = {
   'papyrus': 'Papyrus, fantasy',
   'rockwell': 'Rockwell, "Courier Bold", Courier, Georgia, Times, "Times New Roman", serif',
   'snell-roundhand': '"Snell Roundhand", "Brush Script MT", cursive, fantasy',
-  'symbol': 'Symbol, sans-serif',
-  'webdings': 'Webdings, sans-serif',
-  'wingdings': 'Wingdings, sans-serif',
-  'wingdings-2': '"Wingdings 2", sans-serif',
-  'wingdings-3': '"Wingdings 3", sans-serif',
   
   // Google Fonts (supported in Gmail and some clients)
   'roboto': '"Roboto", Arial, sans-serif',
