@@ -25,13 +25,7 @@ enum MessageStatus {
   ANSWERED
 }
 
-enum ShortlistStatus {
-  TARGET
-  CONTACTED
-  NO_RESPONSE
-  NOT_INTERESTED
-  INTERESTED
-}
+// Removed ShortlistStatus enum to allow dynamic status values
 
 /* =========================
    Core Models
@@ -178,7 +172,7 @@ model Shortlist {
   investorId String   @map("investor_id")
   user       User     @relation(fields: [userId], references: [id])
   investor   Investor @relation(fields: [investorId], references: [id])
-  status     ShortlistStatus @default(TARGET)
+  status     String   @default("TARGET") // Changed from enum to string for flexibility
 
   @@unique([userId, investorId])
   @@index([userId])
