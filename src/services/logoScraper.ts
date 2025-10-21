@@ -1,5 +1,5 @@
 import { load } from 'cheerio';
-import { uploadPublicFile, getSignedUrlForAsset } from './storage';
+import { uploadPublicFile, getSignedUrlForAsset } from './storage.js';
 
 export interface LogoScrapingResult {
   success: boolean;

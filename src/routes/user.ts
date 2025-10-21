@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
+import { uploadPublicFile, getSignedUrlForAsset } from '../services/storage.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -201,7 +202,6 @@ router.post('/user/upload-logo', upload.single('logo'), async (req, res) => {
     }
 
     // Upload to B2
-    const { uploadPublicFile, getSignedUrlForAsset } = await import('../services/storage');
     const fileKey = `logos/logo-${Date.now()}-${file.originalname}`;
     
     await uploadPublicFile(file.buffer, fileKey, file.mimetype);

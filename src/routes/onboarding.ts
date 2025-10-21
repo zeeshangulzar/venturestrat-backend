@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { scrapeWebsiteLogo } from '../services/logoScraper';
+import { scrapeWebsiteLogo } from '../services/logoScraper.js';
 
 const router = Router();
 const prisma = new PrismaClient();

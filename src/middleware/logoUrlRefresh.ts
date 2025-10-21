@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { isSignedUrl, refreshSignedUrl } from '../services/storage';
+import { isSignedUrl, refreshSignedUrl } from '../services/storage.js';
 
 const prisma = new PrismaClient();
 

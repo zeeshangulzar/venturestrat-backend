@@ -5,7 +5,7 @@ import multer from 'multer';
 import { google } from "googleapis";
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { load } from 'cheerio';
-import { uploadFile, getFileUrl } from '../services/storage';
+import { uploadFile, getFileUrl } from '../services/storage.js';
 
 // Utility function to format file sizes
 const formatFileSize = (bytes: number): string => {
