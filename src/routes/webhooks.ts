@@ -804,9 +804,345 @@ router.post('/webhooks/clerk', async (req, res) => {
   }
 });
 
+// Microsoft Graph webhook validation (GET request)
+router.get('/webhooks/microsoft-notification', async (req, res) => {
+  try {
+    console.log('Microsoft Graph GET validation request received:', {
+      query: req.query,
+      headers: req.headers
+    });
+    
+    const validationToken = req.query.validationToken;
+    if (validationToken) {
+      console.log('Microsoft Graph validation token received:', validationToken);
+      // Microsoft Graph expects the validation token echoed back
+      res.set('Content-Type', 'text/plain');
+      return res.status(200).send(validationToken);
+    }
+    
+    // Default response for GET requests
+    res.set('Content-Type', 'text/plain');
+    return res.status(200).send('Microsoft Graph webhook endpoint is active');
+  } catch (error) {
+    console.error('Microsoft Graph GET validation error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Microsoft Graph notification webhook for handling replies (ANSWERED status)
+router.post('/webhooks/microsoft-notification', async (req, res) => {
+  try {
+    // Add ngrok skip header to response for development
+    res.set('ngrok-skip-browser-warning', 'true');
+    
+    console.log('Microsoft Graph notification webhook received:', {
+      headers: req.headers,
+      body: req.body,
+      contentType: req.headers['content-type'],
+      contentLength: req.headers['content-length']
+    });
+
+    // Handle empty requests (Microsoft Graph validation requests)
+    if (!req.body || Object.keys(req.body).length === 0) {
+      console.log('Empty Microsoft Graph webhook request - likely validation request');
+      
+      // Check if this is a Microsoft Graph validation request
+      const validationToken = req.query.validationToken;
+      if (validationToken) {
+        console.log('Microsoft Graph validation token received:', validationToken);
+        // Microsoft Graph expects the validation token echoed back
+        res.set('Content-Type', 'text/plain');
+        return res.status(200).send(validationToken);
+      }
+      
+      // Microsoft Graph expects a 200 status with no body for validation
+      res.set('Content-Type', 'text/plain');
+      return res.status(200).end();
+    }
+
+    // Microsoft Graph sends notifications in a specific format
+    const { value } = req.body;
+    
+    if (!value || !Array.isArray(value)) {
+      console.log('No notification data in Microsoft Graph webhook');
+      return res.status(200).json({ success: true, message: 'No notification data' });
+    }
+
+    console.log('Processing Microsoft Graph notifications:', value.length);
+
+    for (const notification of value) {
+      try {
+        const {
+          subscriptionId,
+          subscriptionExpirationDateTime,
+          changeType,
+          resource,
+          resourceData,
+          clientState
+        } = notification;
+
+        console.log('Processing Microsoft Graph notification:', {
+          subscriptionId,
+          changeType,
+          resource,
+          clientState
+        });
+
+        // Only process message creation events
+        if (changeType !== 'created' || !resource.includes('messages')) {
+          console.log('Skipping notification - not a message creation event');
+          continue;
+        }
+
+        // Skip if this is a sent message (we only want incoming messages)
+        if (resource.includes('sentItems') || resource.includes('sent')) {
+          console.log('Skipping notification - this is a sent message, we only want incoming messages');
+          continue;
+        }
+
+        // Extract user ID from clientState
+        const userId = clientState?.replace('secret-', '');
+        if (!userId) {
+          console.log('No user ID found in clientState, skipping notification');
+          continue;
+        }
+
+        // Get user from database
+        const user = await prisma.user.findUnique({
+          where: { id: userId }
+        });
+
+        if (!user) {
+          console.log(`User ${userId} not found in database, skipping notification`);
+          continue;
+        }
+
+        // Get Microsoft Graph access token
+        const tokens = await clerkClient.users.getUserOauthAccessToken(userId, 'oauth_microsoft');
+        
+        if (!tokens.data || tokens.data.length === 0) {
+          console.log(`No Microsoft OAuth tokens available for user ${userId}, skipping notification`);
+          continue;
+        }
+
+        const accessToken = tokens.data[0].token;
+
+        // Fetch the message details from Microsoft Graph
+        const messageId = resource.split('/').pop();
+        if (!messageId) {
+          console.log('No message ID found in resource path');
+          continue;
+        }
+
+        const messageResponse = await fetch(
+          `https://graph.microsoft.com/v1.0/me/messages/${messageId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        if (!messageResponse.ok) {
+          console.error(`Failed to fetch message ${messageId}:`, messageResponse.status);
+          continue;
+        }
+
+        const messageData = await messageResponse.json();
+        
+        // Extract email details
+        const sender = messageData.from?.emailAddress?.address || '';
+        const subject = messageData.subject || '';
+        const body = messageData.body?.content || '';
+        const date = messageData.receivedDateTime || '';
+        const toRecipients = messageData.toRecipients?.map((r: any) => r.emailAddress?.address).filter(Boolean) || [];
+        const ccRecipients = messageData.ccRecipients?.map((r: any) => r.emailAddress?.address).filter(Boolean) || [];
+        const isRead = messageData.isRead || false;
+        const isDraft = messageData.isDraft || false;
+
+        console.log('Microsoft Graph message details:', {
+          sender,
+          subject,
+          toRecipients,
+          ccRecipients,
+          bodyLength: body.length,
+          isRead,
+          isDraft,
+          receivedDateTime: messageData.receivedDateTime,
+          sentDateTime: messageData.sentDateTime
+        });
+
+        // Skip if this is a draft or if it's a sent message (we only want incoming messages)
+        if (isDraft) {
+          console.log('Skipping Microsoft Graph notification - this is a draft message');
+          continue;
+        }
+
+        // Additional check: if sentDateTime is more recent than receivedDateTime, it's likely a sent message
+        if (messageData.sentDateTime && messageData.receivedDateTime) {
+          const sentTime = new Date(messageData.sentDateTime);
+          const receivedTime = new Date(messageData.receivedDateTime);
+          if (sentTime > receivedTime) {
+            console.log('Skipping Microsoft Graph notification - this appears to be a sent message');
+            continue;
+          }
+        }
+
+        if (!sender || toRecipients.length === 0) {
+          console.log('Insufficient data to process Microsoft Graph notification');
+          continue;
+        }
+
+        const senderEmail = extractEmailAddress(sender);
+        if (!senderEmail) {
+          console.log('No valid sender email found');
+          continue;
+        }
+
+        // Clean the email body
+        const cleanedBody = extractLatestReplyBody(body);
+
+        const senderCandidates = Array.from(
+          new Set<string>([
+            senderEmail,
+            senderEmail.toLowerCase(),
+            senderEmail.toUpperCase()
+          ])
+        );
+
+        const recipientCandidateSet = new Set<string>();
+        for (const address of toRecipients) {
+          const cleaned = extractEmailAddress(address);
+          if (!cleaned) continue;
+          recipientCandidateSet.add(cleaned);
+          recipientCandidateSet.add(cleaned.toLowerCase());
+          recipientCandidateSet.add(cleaned.toUpperCase());
+        }
+
+        const recipientCandidates = Array.from(recipientCandidateSet);
+
+        console.log('Matching Microsoft Graph reply sender candidates:', senderCandidates);
+        console.log('Matching Microsoft Graph reply recipient candidates:', recipientCandidates);
+
+        // First, try to find a SENT message where the sender of the reply matches the recipient of the original message
+        const existingSentMessage = await prisma.message.findFirst({
+          where: {
+            status: MessageStatus.SENT,
+            AND: [
+              {
+                to: {
+                  hasSome: senderCandidates
+                }
+              },
+              {
+                from: {
+                  in: recipientCandidates
+                }
+              }
+            ]
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          include: {
+            user: true,
+            investor: true
+          }
+        });
+
+        if (existingSentMessage) {
+          const result = await createAnsweredMessage({
+            originalMessage: existingSentMessage,
+            senderEmail,
+            subject,
+            body: cleanedBody,
+            recipientCandidates,
+            ccAddresses: ccRecipients,
+            emailAddress: user.email,
+            isFallback: false
+          });
+
+          console.log('Microsoft Graph notification processed successfully:', result);
+          continue;
+        }
+
+        // Fallback: Try to find a SENT message with just subject matching
+        console.log('Primary matching failed, trying fallback matching by subject...');
+        
+        const fallbackSentMessage = await prisma.message.findFirst({
+          where: {
+            status: MessageStatus.SENT,
+            AND: [
+              {
+                subject: {
+                  equals: subject.replace(/^(Re:\s*|RE:\s*)/i, ''),
+                  mode: 'insensitive'
+                }
+              },
+              {
+                to: {
+                  hasSome: senderCandidates
+                }
+              }
+            ]
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          include: {
+            user: true,
+            investor: true
+          }
+        });
+
+        if (fallbackSentMessage) {
+          const result = await createAnsweredMessage({
+            originalMessage: fallbackSentMessage,
+            senderEmail,
+            subject,
+            body: cleanedBody,
+            recipientCandidates,
+            ccAddresses: ccRecipients,
+            emailAddress: user.email,
+            isFallback: true
+          });
+
+          console.log('Microsoft Graph notification processed successfully via fallback:', result);
+        } else {
+          console.log('No matching SENT message found for Microsoft Graph notification:', {
+            subject,
+            sender,
+            recipients: toRecipients
+          });
+        }
+
+      } catch (notificationError) {
+        console.error('Error processing individual Microsoft Graph notification:', notificationError);
+        // Continue processing other notifications
+      }
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Microsoft Graph notification processed successfully' 
+    });
+
+  } catch (error) {
+    console.error('Microsoft Graph notification webhook processing error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // Gmail notification webhook for handling replies (ANSWERED status)
 router.post('/webhooks/gmail-notification', async (req, res) => {
   try {
+    // Add ngrok skip header to response for development
+    res.set('ngrok-skip-browser-warning', 'true');
+    
     console.log('Gmail notification webhook received:', {
       headers: req.headers,
       body: req.body

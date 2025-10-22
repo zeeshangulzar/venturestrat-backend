@@ -86,6 +86,78 @@ async function sendViaGmail(accessToken: string, message: any, attachmentLinks: 
     requestBody: { raw: encodedMessage },
   });
 }
+
+async function sendViaMicrosoftGraph(accessToken: string, message: any, attachmentLinks: any[]) {
+  let cleanedBody = cleanEmailBody(message.body);
+
+  const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
+  const ccRecipients = Array.isArray(message.cc) ? message.cc : (message.cc ? [message.cc] : []);
+  const replyToAddress = message.replyTo || message.from;
+
+  // Add attachment download links to email content
+  if (attachmentLinks.length > 0) {
+    const attachmentLinksHtml = attachmentLinks.map(att => 
+      `<p>📎 ${att.filename} (${formatFileSize(att.size)}) - <a href="${att.url}">Download</a></p>`
+    ).join('');
+    
+    // Add simple attachment section to the email body
+    cleanedBody += `
+      <p><strong>Attachments:</strong></p>
+      ${attachmentLinksHtml}
+    `;
+  }
+
+  // Prepare Microsoft Graph email message
+  const emailMessage = {
+    message: {
+      subject: message.subject,
+      body: {
+        contentType: 'HTML',
+        content: cleanedBody
+      },
+      toRecipients: toRecipients.map(email => ({
+        emailAddress: {
+          address: email
+        }
+      })),
+      ...(ccRecipients.length > 0 && {
+        ccRecipients: ccRecipients.map(email => ({
+          emailAddress: {
+            address: email
+          }
+        }))
+      }),
+      ...(replyToAddress && {
+        replyTo: [{
+          emailAddress: {
+            address: replyToAddress
+          }
+        }]
+      })
+    },
+    saveToSentItems: true
+  };
+
+  console.log('Microsoft Graph email content with attachments:', cleanedBody);
+  console.log('Microsoft Graph attachment links:', attachmentLinks);
+  console.log('Microsoft Graph email message:', JSON.stringify(emailMessage, null, 2));
+
+  const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(emailMessage)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`Microsoft Graph API error: ${response.status} - ${JSON.stringify(errorData)}`);
+  }
+
+  return response;
+}
 // Function to clean email body for proper HTML formatting
 // Comprehensive font family mapping for email client compatibility
 const FONT_FAMILY_MAP: Record<string, string> = {
@@ -672,10 +744,29 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       return res.status(400).json({ error: 'Message has already been sent' });
     }
 
-    const tokens = await clerkClient.users.getUserOauthAccessToken(
-      message.user.id,
-      "oauth_google"
-    );
+    // Check for Google OAuth tokens first
+    let googleTokens;
+    try {
+      googleTokens = await clerkClient.users.getUserOauthAccessToken(
+        message.user.id,
+        "oauth_google"
+      );
+    } catch (error) {
+      console.log('No Google OAuth tokens found, checking Microsoft...');
+    }
+
+    // Check for Microsoft OAuth tokens if no Google tokens
+    let microsoftTokens;
+    if (!googleTokens?.data || googleTokens.data.length === 0) {
+      try {
+        microsoftTokens = await clerkClient.users.getUserOauthAccessToken(
+          message.user.id,
+          "oauth_microsoft"
+        );
+      } catch (error) {
+        console.log('No Microsoft OAuth tokens found either, will use SendGrid fallback...');
+      }
+    }
 
     // Prepare email data
     const cleanBody = cleanEmailBody(message.body);
@@ -708,11 +799,16 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       }
     }
 
-    if (tokens.data && tokens.data.length > 0) {
+    if (googleTokens?.data && googleTokens.data.length > 0) {
       // --- Use Gmail API ---
-      const accessToken = tokens.data[0].token;
+      const accessToken = googleTokens.data[0].token;
       await sendViaGmail(accessToken, message, emailAttachments);
       console.log('Email sent via Gmail API');
+    } else if (microsoftTokens?.data && microsoftTokens.data.length > 0) {
+      // --- Use Microsoft Graph API ---
+      const accessToken = microsoftTokens.data[0].token;
+      await sendViaMicrosoftGraph(accessToken, message, emailAttachments);
+      console.log('Email sent via Microsoft Graph API');
     } else {
       // --- Fallback to SendGrid ---
       const emailData = {
