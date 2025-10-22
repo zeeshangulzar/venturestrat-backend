@@ -2,18 +2,17 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const s3Client = new S3Client({
-  region: process.env.B2_REGION || 'us-east-005',
-  endpoint: process.env.B2_ENDPOINT,
+  region: process.env.AWS_REGION || 'us-east-1',
   credentials: {
-    accessKeyId: process.env.B2_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.B2_SECRET_ACCESS_KEY!,
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
   },
-  forcePathStyle: true, // Required for Backblaze B2
+  // Note: forcePathStyle is not needed for AWS S3 (it's the default)
 });
 
 export const uploadFile = async (file: Buffer, key: string, contentType: string) => {
   const command = new PutObjectCommand({
-    Bucket: process.env.B2_BUCKET_NAME!,
+    Bucket: process.env.AWS_S3_BUCKET_NAME!,
     Key: key,
     Body: file,
     ContentType: contentType,
@@ -24,13 +23,13 @@ export const uploadFile = async (file: Buffer, key: string, contentType: string)
 
 // Specific function for uploading public files (like logos)
 export const uploadPublicFile = async (file: Buffer, key: string, contentType: string) => {
-  // Upload file first
   const uploadCommand = new PutObjectCommand({
-    Bucket: process.env.B2_BUCKET_NAME!,
+    Bucket: process.env.AWS_S3_BUCKET_NAME!,
     Key: key,
     Body: file,
     ContentType: contentType,
     CacheControl: 'public, max-age=31536000', // Cache for 1 year
+    // Note: ACL removed - bucket doesn't support ACLs, using bucket policy instead
     Metadata: {
       'upload-purpose': 'public-asset',
       'upload-timestamp': Date.now().toString(),
@@ -38,40 +37,27 @@ export const uploadPublicFile = async (file: Buffer, key: string, contentType: s
   });
   
   await s3Client.send(uploadCommand);
-  
-  // For Backblaze B2, we need to use the B2 native API to make the file public
-  // Since we're using S3-compatible API, we'll return the upload result
-  // The file will be accessible via the public URL if the bucket allows it
   return { success: true };
 };
 
 export const getFileUrl = async (key: string, expiresIn: number = 3600) => {
   const command = new GetObjectCommand({
-    Bucket: process.env.B2_BUCKET_NAME!,
+    Bucket: process.env.AWS_S3_BUCKET_NAME!,
     Key: key,
   });
   
   return await getSignedUrl(s3Client, command, { expiresIn });
 };
 
-export const getPublicFileUrl = (key: string) => {
-  // For logos and other public files, use the direct public URL
-  const bucketName = process.env.B2_BUCKET_NAME;
-  
-  if (!bucketName) {
-    throw new Error('B2_BUCKET_NAME must be set');
-  }
-  
-  // Backblaze B2 public URL format: https://f000.backblazeb2.com/file/bucket-name/key
-  // Or use the friendly URL: https://bucket-name.s3.us-east-005.backblazeb2.com/key
-  const friendlyUrl = `https://${bucketName}.s3.us-east-005.backblazeb2.com/${key}`;
-  return friendlyUrl;
+export const getPublicFileUrl = async (key: string) => {
+  // Since bucket doesn't support ACLs, use signed URLs for public access
+  return await getSignedUrlForAsset(key);
 };
 
 // Generate a signed URL for assets (like logos) - expires in 7 days
 export const getSignedUrlForAsset = async (key: string) => {
   const command = new GetObjectCommand({
-    Bucket: process.env.B2_BUCKET_NAME!,
+    Bucket: process.env.AWS_S3_BUCKET_NAME!,
     Key: key,
   });
   
@@ -119,7 +105,7 @@ export const refreshSignedUrl = async (url: string): Promise<string> => {
 
 export const deleteFile = async (key: string) => {
   const command = new DeleteObjectCommand({
-    Bucket: process.env.B2_BUCKET_NAME!,
+    Bucket: process.env.AWS_S3_BUCKET_NAME!,
     Key: key,
   });
   
