@@ -5,6 +5,47 @@ const prisma = new PrismaClient();
 const clean = (v?: string | null) => (v ?? '').trim();
 const norm = (s?: string | null) => (s ?? '').trim().toLowerCase();
 
+type InvestorScopeConfig = {
+  orderBy: Prisma.InvestorOrderByWithRelationInput[];
+  where?: Prisma.InvestorWhereInput;
+};
+
+const DEFAULT_SCOPE_KEY = 'DEFAULT';
+
+// Session-scoped ordering options ensure users see a consistent list until they log out.
+const INVESTOR_SCOPE_CONFIGS: Record<string, InvestorScopeConfig> = {
+  [DEFAULT_SCOPE_KEY]: {
+    orderBy: [{ id: 'asc' }],
+  },
+  UPDATED_RECENT: {
+    orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+  },
+  EMAIL_HEAVY: {
+    orderBy: [{ emails: { _count: 'desc' } }, { id: 'asc' }],
+  },
+  EMAIL_LIGHT: {
+    orderBy: [{ emails: { _count: 'asc' } }, { id: 'asc' }],
+  },
+  NAME_ASC: {
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+  },
+  NAME_DESC: {
+    orderBy: [{ name: 'desc' }, { id: 'asc' }],
+  },
+  COMPANY_ASC: {
+    orderBy: [{ companyName: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+  },
+  COUNTRY_ASC: {
+    orderBy: [{ country: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+  },
+  STATE_ASC: {
+    orderBy: [{ state: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+  },
+  CITY_ASC: {
+    orderBy: [{ city: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+  },
+};
+
 function paginate<T>(arr: T[], page: number, per: number): T[] {
   const start = (page - 1) * per;
   return arr.slice(start, start + per);
@@ -12,6 +53,7 @@ function paginate<T>(arr: T[], page: number, per: number): T[] {
 
 router.get('/investors', async (req, res) => {
   const { page = '1', search = '', filters = '{}', itemsPerPage = '20' } = req.query;
+  const scopeParam = typeof req.query.scope === 'string' ? req.query.scope : DEFAULT_SCOPE_KEY;
 
   try {
     // Safe parse filters
@@ -21,6 +63,10 @@ router.get('/investors', async (req, res) => {
 
     const pageNumber = Number.parseInt(String(page), 10) || 1;
     const itemsPerPageNumber = Number.parseInt(String(itemsPerPage), 10) || 20;
+
+    const scopeKey = INVESTOR_SCOPE_CONFIGS[scopeParam] ? scopeParam : DEFAULT_SCOPE_KEY;
+    const scopeConfig = INVESTOR_SCOPE_CONFIGS[scopeKey];
+    console.info(`[investors] applying scope="${scopeKey}" page=${pageNumber} items=${itemsPerPageNumber}`);
 
     // ---- Where clause built for new schema ----
     const whereClause: Prisma.InvestorWhereInput = {};
@@ -80,12 +126,18 @@ router.get('/investors', async (req, res) => {
       };
     }
 
+    const effectiveWhere =
+      scopeConfig.where
+        ? { AND: [whereClause, scopeConfig.where] }
+        : whereClause;
+
     const [investors, totalCount] = await Promise.all([
       prisma.investor.findMany({
-        where: whereClause,
+        where: effectiveWhere,
         skip: (pageNumber - 1) * itemsPerPageNumber,
         take: itemsPerPageNumber,
-        orderBy: [{ id: 'asc' }],
+        orderBy: scopeConfig.orderBy,
+        distinct: ['id'],
         include: {
           emails: true,
           pastInvestments: { include: { pastInvestment: true } },
@@ -99,7 +151,7 @@ router.get('/investors', async (req, res) => {
           avatar: true
         },
       }),
-      prisma.investor.count({ where: whereClause }),
+      prisma.investor.count({ where: effectiveWhere }),
     ]);
 
     res.json({
