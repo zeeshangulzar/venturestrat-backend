@@ -115,13 +115,13 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
         contentType: 'HTML',
         content: cleanedBody
       },
-      toRecipients: toRecipients.map(email => ({
+      toRecipients: toRecipients.map((email: string) => ({
         emailAddress: {
           address: email
         }
       })),
       ...(ccRecipients.length > 0 && {
-        ccRecipients: ccRecipients.map(email => ({
+        ccRecipients: ccRecipients.map((email: string) => ({
           emailAddress: {
             address: email
           }
