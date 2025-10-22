@@ -21,6 +21,7 @@
     "@prisma/client": "^6.13.0",
     "@sendgrid/mail": "^8.1.5",
     "@types/multer": "^2.0.0",
+    "axios": "^1.12.2",
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "country-state-city": "^3.2.1",
