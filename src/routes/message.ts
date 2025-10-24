@@ -26,7 +26,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 25 * 1024 * 1024, // 25MB limit
   },
 });
 
@@ -895,8 +895,39 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       });
     }
 
-    res.status(500).json({ 
+    // Provide user-friendly error messages based on error type
+    let errorMessage = 'Failed to send email. Please try again.';
+    let statusCode = 500;
+    
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      errorMessage = 'File size too large. Please select files smaller than 25MB.';
+      statusCode = 413;
+    } else if (error.code === 'LIMIT_FILE_COUNT') {
+      errorMessage = 'Too many files attached. Please reduce the number of attachments.';
+      statusCode = 413;
+    } else if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+      errorMessage = 'Invalid file type detected. Please check your attachments.';
+      statusCode = 400;
+    } else if (error.response?.status === 413) {
+      errorMessage = 'Request too large. Please reduce file sizes and try again.';
+      statusCode = 413;
+    } else if (error.message?.includes('network') || error.message?.includes('timeout')) {
+      errorMessage = 'Network error occurred. Please check your connection and try again.';
+      statusCode = 503;
+    } else if (error.message?.includes('authentication') || error.message?.includes('unauthorized')) {
+      errorMessage = 'Authentication failed. Please reconnect your email account.';
+      statusCode = 401;
+    } else if (error.response?.body?.errors) {
+      // SendGrid specific errors
+      const sendGridErrors = error.response.body.errors;
+      if (Array.isArray(sendGridErrors) && sendGridErrors.length > 0) {
+        errorMessage = `Email sending failed: ${sendGridErrors[0].message}`;
+      }
+    }
+
+    res.status(statusCode).json({ 
       error: 'Failed to send email',
+      message: errorMessage,
       details: error.response?.body?.errors || error.message,
       statusCode: error.code,
       fullError: error.response?.data
