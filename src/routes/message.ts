@@ -30,6 +30,14 @@ const upload = multer({
   },
 });
 
+const buildSenderDisplayName = (user: any, fallback: string) => {
+  if (!user) return fallback;
+  const first = typeof user.firstname === 'string' ? user.firstname.trim() : '';
+  const last = typeof user.lastname === 'string' ? user.lastname.trim() : '';
+  const full = `${first} ${last}`.trim();
+  return full || fallback;
+};
+
 const MAX_ATTACHMENT_SIZE = 75 * 1024 * 1024; // 75MB
 
 const sanitizeFilename = (filename: string) => {
@@ -99,6 +107,9 @@ async function sendViaGmail(accessToken: string, message: any, attachmentLinks: 
   const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
   const ccRecipients = Array.isArray(message.cc) ? message.cc : (message.cc ? [message.cc] : []);
   const replyToAddress = message.replyTo || message.from;
+  const senderName = buildSenderDisplayName(message.user, message.from);
+  const encodedSenderName = senderName.replace(/"/g, '\\"');
+  const fromHeader = `"${encodedSenderName}" <${message.from}>`;
 
   // Add attachment download links to email content
   if (attachmentLinks.length > 0) {
@@ -116,7 +127,7 @@ async function sendViaGmail(accessToken: string, message: any, attachmentLinks: 
   const headerLines = [
     `To: ${toRecipients.join(", ")}`,
     ...(ccRecipients.length > 0 ? [`Cc: ${ccRecipients.join(", ")}`] : []),
-    `From: ${message.from}`,
+    `From: ${fromHeader}`,
     ...(replyToAddress ? [`Reply-To: ${replyToAddress}`] : []),
     `Subject: ${message.subject}`,
   ];
@@ -152,6 +163,7 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
   const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
   const ccRecipients = Array.isArray(message.cc) ? message.cc : (message.cc ? [message.cc] : []);
   const replyToAddress = message.replyTo || message.from;
+  const senderName = buildSenderDisplayName(message.user, message.from);
 
   // Add attachment download links to email content
   if (attachmentLinks.length > 0) {
@@ -179,6 +191,12 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
           address: email
         }
       })),
+      from: {
+        emailAddress: {
+          address: message.from,
+          name: senderName
+        }
+      },
       ...(ccRecipients.length > 0 && {
         ccRecipients: ccRecipients.map((email: string) => ({
           emailAddress: {
@@ -189,7 +207,8 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
       ...(replyToAddress && {
         replyTo: [{
           emailAddress: {
-            address: replyToAddress
+            address: replyToAddress,
+            name: senderName
           }
         }]
       })
@@ -946,6 +965,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       console.log('Email sent via Microsoft Graph API');
     } else {
       // --- Fallback to SendGrid ---
+      const senderName = buildSenderDisplayName(message.user, message.from);
       const emailData = {
         to: Array.isArray(message.to) ? message.to : [message.to],
         ...(message.cc && message.cc.length > 0 && {
@@ -953,7 +973,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
         }),
         from: {
           email: 'info@venturestrat.ai',
-          name: message.user.firstname + ' ' + message.user.lastname
+          name: senderName
         },
         replyTo: message.from,
         subject: message.subject,
