@@ -11,6 +11,13 @@ type InvestorScopeConfig = {
 };
 
 const DEFAULT_SCOPE_KEY = 'DEFAULT';
+const PRIORITY_COUNTRIES = [
+  'United States',
+  'Canada',
+  'United Kingdom',
+  'Singapore',
+  'Australia',
+];
 
 // Session-scoped ordering options ensure users see a consistent list until they log out.
 const INVESTOR_SCOPE_CONFIGS: Record<string, InvestorScopeConfig> = {
@@ -104,6 +111,7 @@ router.get('/investors', async (req, res) => {
     if (Array.isArray(parsedFilters.investmentType) && parsedFilters.investmentType.length) {
       whereClause.investorTypes = { hasSome: parsedFilters.investmentType as string[] };
     }
+
     // Markets (join table remains)
     if (Array.isArray(parsedFilters.investmentFocus) && parsedFilters.investmentFocus.length) {
       whereClause.markets = {
@@ -131,11 +139,86 @@ router.get('/investors', async (req, res) => {
         ? { AND: [whereClause, scopeConfig.where] }
         : whereClause;
 
-    const [investors, totalCount] = await Promise.all([
-      prisma.investor.findMany({
-        where: effectiveWhere,
-        skip: (pageNumber - 1) * itemsPerPageNumber,
-        take: itemsPerPageNumber,
+    // ---- Custom ordering logic to prioritize countries ----
+    const priorityWhereClause: Prisma.InvestorWhereInput = {
+      OR: PRIORITY_COUNTRIES.map(country => ({
+        country: { equals: country, mode: Prisma.QueryMode.insensitive },
+      })),
+    };
+
+    const priorityFilter: Prisma.InvestorWhereInput = {
+      AND: [effectiveWhere, priorityWhereClause],
+    };
+
+    const nonPriorityWithCountryFilter: Prisma.InvestorWhereInput = {
+      AND: [
+        effectiveWhere,
+        { NOT: priorityWhereClause },
+        { country: { not: null } },
+        { country: { not: '', mode: Prisma.QueryMode.insensitive } },
+      ],
+    };
+
+    const noCountryFilter: Prisma.InvestorWhereInput = {
+      AND: [
+        effectiveWhere,
+        {
+          OR: [
+            { country: null },
+            { country: { equals: '', mode: Prisma.QueryMode.insensitive } },
+          ],
+        },
+      ],
+    };
+
+    const [priorityCount, nonPriorityWithCountryCount, noCountryCount] = await Promise.all([
+      prisma.investor.count({ where: priorityFilter }),
+      prisma.investor.count({ where: nonPriorityWithCountryFilter }),
+      prisma.investor.count({ where: noCountryFilter }),
+    ]);
+
+    const totalCount = priorityCount + nonPriorityWithCountryCount + noCountryCount;
+
+    if (totalCount === 0) {
+      return res.json({
+        investors: [],
+        pagination: {
+          currentPage: 1,
+          totalPages: 1,
+          totalItems: 0,
+          itemsPerPage: itemsPerPageNumber,
+        },
+      });
+    }
+
+    const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPageNumber));
+    const safePageNumber = Math.min(Math.max(pageNumber, 1), totalPages);
+
+    const startIndex = (safePageNumber - 1) * itemsPerPageNumber;
+
+    let remaining = itemsPerPageNumber;
+    let skipCursor = startIndex;
+
+    const allocate = (count: number) => {
+      const skip = Math.min(skipCursor, count);
+      const available = Math.max(count - skip, 0);
+      const take = Math.min(remaining, available);
+      skipCursor = Math.max(skipCursor - count, 0);
+      remaining -= take;
+      return { skip, take };
+    };
+
+    const { skip: prioritySkip, take: priorityTake } = allocate(priorityCount);
+    const { skip: nonPrioritySkip, take: nonPriorityTake } = allocate(nonPriorityWithCountryCount);
+    const { skip: noCountrySkip, take: noCountryTake } = allocate(noCountryCount);
+
+    const investors: any[] = [];
+
+    if (priorityTake > 0) {
+      const priorityInvestors = await prisma.investor.findMany({
+        where: priorityFilter,
+        skip: prioritySkip,
+        take: priorityTake,
         orderBy: scopeConfig.orderBy,
         distinct: ['id'],
         include: {
@@ -150,15 +233,61 @@ router.get('/investors', async (req, res) => {
           sourceData: true,
           avatar: true
         },
-      }),
-      prisma.investor.count({ where: effectiveWhere }),
-    ]);
+      });
+      investors.push(...priorityInvestors);
+    }
+
+    if (nonPriorityTake > 0) {
+      const nonPriorityInvestors = await prisma.investor.findMany({
+        where: nonPriorityWithCountryFilter,
+        skip: nonPrioritySkip,
+        take: nonPriorityTake,
+        orderBy: scopeConfig.orderBy,
+        distinct: ['id'],
+        include: {
+          emails: true,
+          pastInvestments: { include: { pastInvestment: true } },
+          markets: { include: { market: true } },
+        },
+        omit: {
+          createdAt: true,
+          updatedAt: true,
+          externalId: true,
+          sourceData: true,
+          avatar: true
+        },
+      });
+      investors.push(...nonPriorityInvestors);
+    }
+
+    if (noCountryTake > 0) {
+      const noCountryInvestors = await prisma.investor.findMany({
+        where: noCountryFilter,
+        skip: noCountrySkip,
+        take: noCountryTake,
+        orderBy: scopeConfig.orderBy,
+        distinct: ['id'],
+        include: {
+          emails: true,
+          pastInvestments: { include: { pastInvestment: true } },
+          markets: { include: { market: true } },
+        },
+        omit: {
+          createdAt: true,
+          updatedAt: true,
+          externalId: true,
+          sourceData: true,
+          avatar: true
+        },
+      });
+      investors.push(...noCountryInvestors);
+    }
 
     res.json({
       investors,
       pagination: {
-        currentPage: pageNumber,
-        totalPages: Math.ceil(totalCount / itemsPerPageNumber),
+        currentPage: safePageNumber,
+        totalPages,
         totalItems: totalCount,
         itemsPerPage: itemsPerPageNumber,
       },
