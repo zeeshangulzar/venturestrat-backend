@@ -5,7 +5,7 @@ import multer from 'multer';
 import { google } from "googleapis";
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { load } from 'cheerio';
-import { uploadFile, getFileUrl } from '../services/storage.js';
+import { uploadFile, getFileUrl, generateUploadUrl, deleteFile } from '../services/storage.js';
 
 // Utility function to format file sizes
 const formatFileSize = (bytes: number): string => {
@@ -28,6 +28,65 @@ const upload = multer({
   limits: {
     fileSize: 75 * 1024 * 1024, // 75MB limit
   },
+});
+
+const MAX_ATTACHMENT_SIZE = 75 * 1024 * 1024; // 75MB
+
+const sanitizeFilename = (filename: string) => {
+  return filename.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+};
+
+router.post('/message/attachments/upload-url', async (req, res) => {
+  try {
+    const { filename, contentType, size } = req.body || {};
+
+    if (!filename || !contentType) {
+      return res.status(400).json({ error: 'filename and contentType are required' });
+    }
+
+    if (size && Number(size) > MAX_ATTACHMENT_SIZE) {
+      return res.status(413).json({ error: 'File size exceeds 75MB limit' });
+    }
+
+    const safeFilename = sanitizeFilename(filename);
+    const timestamp = Date.now();
+    const fileKey = `attachments/${timestamp}-${safeFilename}`;
+
+    const uploadUrl = await generateUploadUrl(fileKey, contentType);
+    const downloadUrl = await getFileUrl(fileKey, 24 * 60 * 60); // 24 hours
+
+    res.json({
+      key: fileKey,
+      uploadUrl,
+      downloadUrl,
+      expiresIn: 15 * 60, // seconds
+      maxUploadSize: MAX_ATTACHMENT_SIZE,
+    });
+  } catch (error) {
+    console.error('Error generating upload URL:', error);
+    res.status(500).json({ error: 'Failed to generate upload URL' });
+  }
+});
+
+router.post('/message/attachments/delete', async (req, res) => {
+  try {
+    const { key } = req.body || {};
+
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({ error: 'Attachment key is required' });
+    }
+
+    if (!key.startsWith('attachments/')) {
+      return res.status(400).json({ error: 'Invalid attachment key' });
+    }
+
+    console.log("attempting to delete file with key:", key);
+    await deleteFile(key);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting attachment:', error);
+    res.status(500).json({ error: 'Failed to delete attachment' });
+  }
 });
 
 async function sendViaGmail(accessToken: string, message: any, attachmentLinks: any[]) {
@@ -684,26 +743,102 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     console.log('SendGrid API Key configured:', process.env.SENDGRID_API_KEY ? 'Yes' : 'No');
     console.log('API Key length:', process.env.SENDGRID_API_KEY?.length);
 
-    // Parse FormData attachments
-    const emailAttachments = []; // For email sending (base64 content)
-    const b2Attachments = []; // Store B2 file metadata for database
-    console.log('Processing attachments from FormData...');
+    // Parse FormData/JSON attachments
+    const emailAttachments = []; // For email sending (download links)
+    const b2Attachments = []; // Store storage metadata for database
+    console.log('Processing attachments from request payload...');
+
+    const processedKeys = new Set<string>();
+    const rawAttachmentsData = (req.body && (req.body.attachments ?? req.body.attachmentMetadata)) || null;
+    let attachmentMetadata: any[] = [];
+
+    if (Array.isArray(rawAttachmentsData)) {
+      attachmentMetadata = rawAttachmentsData;
+    } else if (typeof rawAttachmentsData === 'string' && rawAttachmentsData.trim().length > 0) {
+      try {
+        attachmentMetadata = JSON.parse(rawAttachmentsData);
+      } catch (error) {
+        console.error('Failed to parse attachment metadata:', error);
+      }
+    } else if (rawAttachmentsData && typeof rawAttachmentsData === 'object') {
+      attachmentMetadata = [rawAttachmentsData];
+    }
+
+    const processAttachmentMetadata = async (metadata: any) => {
+      if (!metadata) return;
+
+      const filename = metadata.filename || metadata.name || 'attachment';
+      const mimeType = metadata.type || metadata.contentType || 'application/octet-stream';
+      const size = Number(metadata.size) || 0;
+      const key = metadata.key || metadata.storageKey || metadata.s3Key;
+      let url = metadata.url;
+
+      if (key) {
+        if (processedKeys.has(key)) {
+          return;
+        }
+        processedKeys.add(key);
+
+        if (!url) {
+          try {
+            url = await getFileUrl(key, 86400);
+          } catch (error) {
+            console.error(`Failed to generate download URL for key ${key}:`, error);
+          }
+        }
+      }
+
+      if (!url && !key) {
+        console.warn('Skipping attachment metadata without key or url:', metadata);
+        return;
+      }
+
+      const attachmentInfo: any = {
+        filename,
+        type: mimeType,
+        size,
+        url,
+      };
+
+      if (key) {
+        attachmentInfo.key = key;
+      }
+
+      b2Attachments.push(attachmentInfo);
+
+      if (url) {
+        emailAttachments.push({
+          filename,
+          type: mimeType,
+          url,
+          size,
+        });
+      }
+    };
+
+    if (attachmentMetadata.length > 0) {
+      for (const metadata of attachmentMetadata) {
+        await processAttachmentMetadata(metadata);
+      }
+    }
     
     // Check if req.files has attachment files (from multer)
     if (req.files && Array.isArray(req.files)) {
       for (const file of req.files) {
         // Only process files that are actual attachments (not other form fields)
         if (file.fieldname.startsWith('attachment_') || file.fieldname === 'attachments') {
-          console.log(`Processing attachment:`, file.originalname, file.size, file.mimetype);
+          const originalName = sanitizeFilename(file.originalname || 'attachment');
+          console.log(`Processing attachment:`, originalName, file.size, file.mimetype);
           
           // Upload to B2 storage
-          const fileKey = `attachments/${Date.now()}-${file.originalname}`;
+          const fileKey = `attachments/${Date.now()}-${originalName}`;
           await uploadFile(file.buffer, fileKey, file.mimetype);
+          processedKeys.add(fileKey);
           
           // Store B2 file metadata for database (URLs only)
           const b2FileInfo = {
             key: fileKey,
-            filename: file.originalname || 'attachment',
+            filename: originalName || 'attachment',
             type: file.mimetype,
             size: file.size,
             url: await getFileUrl(fileKey, 86400) // 24 hours expiry
