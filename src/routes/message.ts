@@ -38,6 +38,94 @@ const buildSenderDisplayName = (user: any, fallback: string) => {
   return full || fallback;
 };
 
+type AttachmentMetadata = {
+  key: string | null;
+  filename: string;
+  type: string;
+  size: number;
+  url: string | null;
+};
+
+const normalizeAttachmentMetadata = (attachment: any): AttachmentMetadata => {
+  const filenameCandidate = attachment?.filename ?? attachment?.name ?? 'attachment';
+  const filename = typeof filenameCandidate === 'string' && filenameCandidate.trim()
+    ? filenameCandidate.trim()
+    : 'attachment';
+
+  const typeCandidate = attachment?.type ?? 'application/octet-stream';
+  const type = typeof typeCandidate === 'string' && typeCandidate.trim()
+    ? typeCandidate.trim()
+    : 'application/octet-stream';
+
+  const size = attachment?.size ? Number(attachment.size) : 0;
+
+  const keyCandidate = attachment?.key;
+  const key = typeof keyCandidate === 'string' && keyCandidate.trim()
+    ? keyCandidate.trim()
+    : null;
+
+  const urlCandidate = attachment?.url;
+  const url = typeof urlCandidate === 'string' && urlCandidate.trim()
+    ? urlCandidate.trim()
+    : null;
+
+  return {
+    key,
+    filename,
+    type,
+    size,
+    url,
+  };
+};
+
+const normalizeAttachmentMetadataList = (attachments: any): AttachmentMetadata[] => {
+  if (!attachments) return [];
+  if (Array.isArray(attachments)) {
+    return attachments.map(normalizeAttachmentMetadata);
+  }
+  return [normalizeAttachmentMetadata(attachments)];
+};
+
+const mergeAttachments = (
+  existing: AttachmentMetadata[],
+  toAdd: AttachmentMetadata[],
+): AttachmentMetadata[] => {
+  if (!toAdd.length) return existing;
+
+  const merged = [...existing];
+
+  toAdd.forEach((candidate) => {
+    const hasKey = candidate.key !== null;
+
+    const alreadyExists = merged.some((attachment) => {
+      if (hasKey && attachment.key) {
+        return attachment.key === candidate.key;
+      }
+
+      if (!hasKey && !attachment.key) {
+        return (
+          attachment.filename === candidate.filename &&
+          attachment.type === candidate.type &&
+          attachment.size === candidate.size
+        );
+      }
+
+      return false;
+    });
+
+    if (!alreadyExists) {
+      merged.push(candidate);
+    }
+  });
+
+  return merged;
+};
+
+const removeAttachmentByKey = (
+  existing: AttachmentMetadata[],
+  key: string,
+): AttachmentMetadata[] => existing.filter((attachment) => attachment.key !== key);
+
 const MAX_ATTACHMENT_SIZE = 75 * 1024 * 1024; // 75MB
 
 const sanitizeFilename = (filename: string) => {
@@ -61,7 +149,7 @@ router.post('/message/attachments/upload-url', async (req, res) => {
     const fileKey = `attachments/${timestamp}-${safeFilename}`;
 
     const uploadUrl = await generateUploadUrl(fileKey, contentType);
-    const downloadUrl = await getFileUrl(fileKey, 24 * 60 * 60); // 24 hours
+    const downloadUrl = await getFileUrl(fileKey, 7 * 24 * 60 * 60); // 7 days (max allowed)
 
     res.json({
       key: fileKey,
@@ -78,7 +166,7 @@ router.post('/message/attachments/upload-url', async (req, res) => {
 
 router.post('/message/attachments/delete', async (req, res) => {
   try {
-    const { key } = req.body || {};
+    const { key, messageId } = req.body || {};
 
     if (!key || typeof key !== 'string') {
       return res.status(400).json({ error: 'Attachment key is required' });
@@ -88,12 +176,83 @@ router.post('/message/attachments/delete', async (req, res) => {
       return res.status(400).json({ error: 'Invalid attachment key' });
     }
 
-    console.log("attempting to delete file with key:", key);
+    console.log('attempting to delete file with key:', key);
     await deleteFile(key);
+
+    if (messageId && typeof messageId === 'string') {
+      const message = await prisma.message.findUnique({
+        where: { id: messageId },
+        select: { attachments: true },
+      });
+
+      if (message?.attachments && Array.isArray(message.attachments)) {
+        const normalized = normalizeAttachmentMetadataList(message.attachments);
+        const updated = removeAttachmentByKey(normalized, key);
+
+        await prisma.message.update({
+          where: { id: messageId },
+          data: {
+            attachments: updated,
+          },
+        });
+      }
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting attachment:', error);
     res.status(500).json({ error: 'Failed to delete attachment' });
+  }
+});
+
+router.post('/message/:messageId/attachments/add', async (req, res) => {
+  const { messageId } = req.params;
+  const { attachments } = req.body || {};
+
+  if (!messageId) {
+    return res.status(400).json({ error: 'Message ID is required' });
+  }
+
+  const attachmentsList = normalizeAttachmentMetadataList(attachments);
+
+  if (!attachmentsList.length) {
+    return res.status(400).json({ error: 'No attachment metadata provided' });
+  }
+
+  try {
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { attachments: true },
+    });
+
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    const existingAttachments = Array.isArray(message.attachments)
+      ? normalizeAttachmentMetadataList(message.attachments)
+      : [];
+
+    const mergedAttachments = mergeAttachments(existingAttachments, attachmentsList);
+
+    const updatedMessage = await prisma.message.update({
+      where: { id: messageId },
+      data: {
+        attachments: mergedAttachments,
+      },
+      select: {
+        id: true,
+        attachments: true,
+      },
+    });
+
+    res.json({
+      message: 'Attachments updated successfully',
+      data: updatedMessage,
+    });
+  } catch (error) {
+    console.error('Error appending message attachments:', error);
+    res.status(500).json({ error: 'Failed to update attachments' });
   }
 });
 
