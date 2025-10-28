@@ -2,6 +2,40 @@ import { load } from 'cheerio';
 import axios from 'axios';
 import { uploadPublicFile, getSignedUrlForAsset } from './storage.js';
 
+const FIRECRAWL_API_URL = 'https://api.firecrawl.dev/v1/scrape';
+const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
+
+// Shared selectors to mirror the Firecrawl test harness
+const logoSelectors = [
+  { selector: 'a[class*="Logo"] svg', description: 'SVG inside elements with "Logo" in class' },
+  { selector: 'svg[aria-label*="logo"]', description: 'SVG with "logo" in aria-label' },
+  { selector: 'img[alt*="logo" i]', description: 'Images with "logo" in alt text' },
+  { selector: 'img[class*="logo" i]', description: 'Images with "logo" in class' },
+  { selector: 'img[id*="logo" i]', description: 'Images with "logo" in ID' },
+  { selector: 'img[src*="Logo"]', description: 'Images with "Logo" in src (case sensitive)' },
+  { selector: '.logo img', description: 'Images inside .logo container' },
+  { selector: '#logo img', description: 'Images inside #logo container' },
+  { selector: '.header img', description: 'Images inside .header container' },
+  { selector: '.navbar img', description: 'Images inside .navbar container' },
+  { selector: '.brand img', description: 'Images inside .brand container' },
+  { selector: '.site-header img', description: 'Images inside .site-header container' },
+  { selector: '.main-header img', description: 'Images inside .main-header container' },
+  { selector: 'img[src*="logo"]', description: 'Images with "logo" in src' },
+  { selector: 'img[src*="brand"]', description: 'Images with "brand" in src' },
+  { selector: 'img[src*="header"]', description: 'Images with "header" in src' },
+  { selector: 'link[rel="icon"]', description: 'Favicon links' },
+  { selector: 'link[rel="shortcut icon"]', description: 'Shortcut icon links' },
+  { selector: 'link[rel="apple-touch-icon"]', description: 'Apple touch icon links' },
+  { selector: 'meta[property="og:image"]', description: 'Open Graph images' },
+  { selector: 'meta[name="twitter:image"]', description: 'Twitter images' },
+  { selector: 'img[src*="favicon"]', description: 'Images with "favicon" in src' },
+  { selector: 'img[src*="icon"]', description: 'Images with "icon" in src' },
+  { selector: 'img[src*="svg"]', description: 'SVG images (often logos)' },
+  { selector: 'img[src*="png"]', description: 'PNG images' },
+  { selector: 'img[src*="jpg"]', description: 'JPG images' },
+  { selector: 'img[src*="jpeg"]', description: 'JPEG images' }
+];
+
 export interface LogoScrapingResult {
   success: boolean;
   logoUrl?: string;
@@ -12,61 +46,45 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
   try {
     // Ensure URL has protocol
     const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
-    
-    // Enhanced headers to mimic real browser (from batch test)
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Cache-Control': 'no-cache',
-      'Pragma': 'no-cache',
-      'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-      'Sec-Ch-Ua-Mobile': '?0',
-      'Sec-Ch-Ua-Platform': '"macOS"',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1',
-      'Connection': 'keep-alive'
-    };
+    const baseUrl = new URL(url).origin;
 
-    // Use axios instead of fetch for better control
-    const response = await axios.get(url, {
-      timeout: 15000,
-      headers: headers,
-      maxRedirects: 5,
-      validateStatus: function (status) {
-        return status >= 200 && status < 400;
+    if (!FIRECRAWL_API_KEY) {
+      return {
+        success: false,
+        error: 'Firecrawl API key is not configured'
+      };
+    }
+
+    const firecrawlResponse = await axios.post(
+      FIRECRAWL_API_URL,
+      {
+        url,
+        formats: ['html', 'markdown'],
+        onlyMainContent: false,
+        waitFor: 2000,
+        timeout: 30000
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 35000
       }
-    });
+    );
 
-    const $ = load(response.data);
+    const html =
+      firecrawlResponse.data?.data?.html ||
+      firecrawlResponse.data?.html;
 
-    // Enhanced logo selectors (from batch test with 91% success rate)
-    const logoSelectors = [
-      { selector: 'a[class*="Logo"] svg', description: 'SVG inside elements with "Logo" in class' },
-      { selector: 'svg[aria-label*="logo"]', description: 'SVG with "logo" in aria-label' },
-      { selector: 'img[alt*="logo" i]', description: 'Images with "logo" in alt text' },
-      { selector: 'img[class*="logo" i]', description: 'Images with "logo" in class' },
-      { selector: 'img[id*="logo" i]', description: 'Images with "logo" in ID' },
-      { selector: 'img[src*="Logo"]', description: 'Images with "Logo" in src (case sensitive)' },
-      { selector: '.logo img', description: 'Images inside .logo container' },
-      { selector: '#logo img', description: 'Images inside #logo container' },
-      { selector: '.header img', description: 'Images inside .header container' },
-      { selector: '.navbar img', description: 'Images inside .navbar container' },
-      { selector: '.brand img', description: 'Images inside .brand container' },
-      { selector: '.site-header img', description: 'Images inside .site-header container' },
-      { selector: '.main-header img', description: 'Images inside .main-header container' },
-      { selector: 'img[src*="logo"]', description: 'Images with "logo" in src' },
-      { selector: 'img[src*="brand"]', description: 'Images with "brand" in src' },
-      { selector: 'img[src*="header"]', description: 'Images with "header" in src' },
-      { selector: 'link[rel="icon"]', description: 'Favicon links' },
-      { selector: 'link[rel="shortcut icon"]', description: 'Shortcut icon links' },
-      { selector: 'link[rel="apple-touch-icon"]', description: 'Apple touch icon links' },
-      { selector: 'meta[property="og:image"]', description: 'Open Graph images' },
-    ];
+    if (!html) {
+      return {
+        success: false,
+        error: 'Firecrawl response did not include HTML content'
+      };
+    }
+
+    const $ = load(html);
 
     let logoUrl: string | null = null;
     let foundSelector: string | null = null;
@@ -79,7 +97,7 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
     }> = [];
 
     // Enhanced logo detection logic (from batch test)
-    for (const { selector, description } of logoSelectors) {
+    for (const { selector } of logoSelectors) {
       const elements = $(selector);
       
       if (elements.length > 0) {
@@ -107,14 +125,18 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
             // Convert relative URLs to absolute
             let absoluteUrl = src;
             
+            if (src.startsWith('data:')) {
+              return;
+            }
+            
             if (src.startsWith('//')) {
               absoluteUrl = `https:${src}`;
             } else if (src.startsWith('/')) {
-              absoluteUrl = new URL(src, url).href;
+              absoluteUrl = new URL(src, baseUrl).href;
             } else if (src.startsWith('http')) {
               absoluteUrl = src;
             } else {
-              absoluteUrl = new URL(src, url).href;
+              absoluteUrl = new URL(src, baseUrl).href;
             }
             
             allFoundImages.push({
