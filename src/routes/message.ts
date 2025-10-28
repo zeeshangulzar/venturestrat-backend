@@ -26,7 +26,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 75 * 1024 * 1024, // 75MB limit
   },
 });
 
@@ -900,7 +900,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     let statusCode = 500;
     
     if (error.code === 'LIMIT_FILE_SIZE') {
-      errorMessage = 'File size too large. Please select files smaller than 10MB.';
+      errorMessage = 'File size too large. Please select files smaller than 75MB.';
       statusCode = 413;
     } else if (error.code === 'LIMIT_FILE_COUNT') {
       errorMessage = 'Too many files attached. Please reduce the number of attachments.';
