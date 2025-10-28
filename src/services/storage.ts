@@ -21,6 +21,16 @@ export const uploadFile = async (file: Buffer, key: string, contentType: string)
   return await s3Client.send(command);
 };
 
+export const generateUploadUrl = async (key: string, contentType: string, expiresIn: number = 900) => {
+  const command = new PutObjectCommand({
+    Bucket: process.env.AWS_S3_BUCKET_NAME!,
+    Key: key,
+    ContentType: contentType,
+  });
+
+  return await getSignedUrl(s3Client, command, { expiresIn });
+};
+
 // Specific function for uploading public files (like logos)
 export const uploadPublicFile = async (file: Buffer, key: string, contentType: string) => {
   const uploadCommand = new PutObjectCommand({
