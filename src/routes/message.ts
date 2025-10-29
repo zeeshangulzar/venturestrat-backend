@@ -1201,11 +1201,11 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     console.error('Error response:', error.response?.data);
     console.error('Error status:', error.code);
     
-    // Update message status to FAILED if it's a SendGrid error
+    // Update message status to DRAFT if it's a SendGrid error
     if (error.response) {
       await prisma.message.update({
         where: { id: messageId },
-        data: { status: 'FAILED' }
+        data: { status: 'DRAFT' }
       });
     }
 
@@ -1229,7 +1229,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       errorMessage = 'Network error occurred. Please check your connection and try again.';
       statusCode = 503;
     } else if (error.message?.includes('authentication') || error.message?.includes('unauthorized')) {
-      errorMessage = 'Authentication failed. Please reconnect your email account.';
+      errorMessage = 'Authentication failed. Please reconnect your account from settings page';
       statusCode = 401;
     } else if (error.response?.body?.errors) {
       // SendGrid specific errors
