@@ -224,14 +224,16 @@ router.get('/investors', async (req, res) => {
         include: {
           emails: true,
           pastInvestments: { include: { pastInvestment: true } },
-          markets: { include: { market: true } },
+          markets: {
+            where: { market: { isCountry: false } },
+            include: { market: true },
+          },
         },
         omit: {
           createdAt: true,
           updatedAt: true,
           externalId: true,
-          sourceData: true,
-          avatar: true
+          sourceData: true
         },
       });
       investors.push(...priorityInvestors);
@@ -247,14 +249,16 @@ router.get('/investors', async (req, res) => {
         include: {
           emails: true,
           pastInvestments: { include: { pastInvestment: true } },
-          markets: { include: { market: true } },
+          markets: {
+            where: { market: { isCountry: false } },
+            include: { market: true },
+          },
         },
         omit: {
           createdAt: true,
           updatedAt: true,
           externalId: true,
-          sourceData: true,
-          avatar: true
+          sourceData: true
         },
       });
       investors.push(...nonPriorityInvestors);
@@ -270,14 +274,16 @@ router.get('/investors', async (req, res) => {
         include: {
           emails: true,
           pastInvestments: { include: { pastInvestment: true } },
-          markets: { include: { market: true } },
+          markets: {
+            where: { market: { isCountry: false } },
+            include: { market: true },
+          },
         },
         omit: {
           createdAt: true,
           updatedAt: true,
           externalId: true,
-          sourceData: true,
-          avatar: true
+          sourceData: true
         },
       });
       investors.push(...noCountryInvestors);
@@ -325,6 +331,7 @@ router.get('/investment-filters', async (req, res) => {
 
       // ---- Markets: table ----
       prisma.market.findMany({
+        where: { isCountry: false },
         orderBy: { title: 'asc' },
       }).then(markets => markets.map(m => m.title)),
 
@@ -356,7 +363,10 @@ router.get('/investors/:id', async (req, res) => {
       include: {
         emails: true,
         pastInvestments: { include: { pastInvestment: true } },
-        markets: { include: { market: true } },
+        markets: {
+          where: { market: { isCountry: false } },
+          include: { market: true },
+        },
       },
     });
 

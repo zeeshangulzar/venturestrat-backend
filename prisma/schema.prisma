@@ -118,6 +118,7 @@ model PastInvestment {
 model Market {
   id      String @id @default(cuid())
   title   String @unique @db.VarChar(255)
+  isCountry   Boolean  @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
