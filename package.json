@@ -30,7 +30,8 @@
     "googleapis": "^163.0.0",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
-    "svix": "^1.75.0"
+    "svix": "^1.75.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
