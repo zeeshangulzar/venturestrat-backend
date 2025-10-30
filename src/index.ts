@@ -9,7 +9,7 @@ import shortlistRoutes from './routes/shortlist.js'
 import webhookRoutes from './routes/webhooks.js'
 import messageRoutes from './routes/message.js'
 import onboardingRoutes from './routes/onboarding.js'
-import emailWorker from './workers/emailWorker.js';
+import './workers/emailWorker.js';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';

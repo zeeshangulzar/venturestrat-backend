@@ -107,67 +107,22 @@ const emailWorker = new Worker(
         throw new Error(`Message ${messageId} not found`);
       }
 
-      let previousMessage = message.previousMessage ?? null;
+      const previousMessage = message.previousMessage ?? (message.previousMessageId
+        ? await prisma.message.findUnique({ where: { id: message.previousMessageId }, select: previousMessageSelect })
+        : null);
 
-      if (message.previousMessageId && !previousMessage) {
-        previousMessage = await prisma.message.findUnique({
-          where: { id: message.previousMessageId },
-          select: previousMessageSelect,
-        });
-        message = { ...message, previousMessage: previousMessage ?? undefined } as typeof message;
-      }
-
-      if (!message.previousMessageId && !previousMessage) {
-        const fallbackPrevious = await prisma.message.findFirst({
-          where: {
-            userId,
-            investorId,
-            status: { in: ['SENT', 'ANSWERED'] },
-            id: { not: message.id },
-          },
-          orderBy: { updatedAt: 'desc' },
-          select: previousMessageSelect,
-        });
-
-        if (fallbackPrevious) {
-          const merged = mergeReferences(
-            message.gmailReferences,
-            fallbackPrevious.gmailReferences,
-            fallbackPrevious.gmailMessageId,
-          );
-
-          await prisma.message.update({
-            where: { id: message.id },
-            data: {
-              previousMessageId: fallbackPrevious.id,
-              ...(message.threadId ? {} : { threadId: fallbackPrevious.threadId }),
-              ...(message.gmailReferences ? {} : { gmailReferences: merged }),
-            },
-          });
-
-          message = {
-            ...message,
-            previousMessageId: fallbackPrevious.id,
-            previousMessage: fallbackPrevious,
-            threadId: message.threadId ?? fallbackPrevious.threadId ?? null,
-            gmailReferences: message.gmailReferences ?? merged ?? null,
-          } as typeof message;
-          previousMessage = fallbackPrevious;
-        }
-      }
-
-      const mergedReferences = mergeReferences(
-        message.gmailReferences,
+      // Only use previous message for reply context; do not mutate current message
+      const referencesFromPrev = mergeReferences(
         previousMessage?.gmailReferences,
         previousMessage?.gmailMessageId,
       );
 
-      const effectiveThreadId = threadId || message.threadId || previousMessage?.threadId || null;
+      const effectiveThreadId = previousMessage?.threadId || threadId || message.threadId || null;
 
       const messageContext = {
         ...message,
         threadId: effectiveThreadId,
-        gmailReferences: mergedReferences ?? null,
+        gmailReferences: referencesFromPrev ?? null,
       } as typeof message;
 
       // Get OAuth tokens
@@ -217,16 +172,11 @@ const emailWorker = new Worker(
         sendResult = await sendViaSendGrid(messageContext);
       }
 
-      const finalReferences = mergeReferences(mergedReferences, sendResult.messageId);
-
-      // Update message status and metadata
+      // Update message status only (do not persist threading metadata)
       await prisma.message.update({
         where: { id: messageId },
         data: {
           status: 'SENT',
-          ...(sendResult.threadId ? { threadId: sendResult.threadId } : {}),
-          ...(sendResult.messageId ? { gmailMessageId: sendResult.messageId } : {}),
-          ...(finalReferences !== null ? { gmailReferences: finalReferences } : {}),
         },
       });
 
