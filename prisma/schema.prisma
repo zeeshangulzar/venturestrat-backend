@@ -23,6 +23,7 @@ enum MessageStatus {
   SENT
   FAILED
   ANSWERED
+  SCHEDULED
 }
 
 // Removed ShortlistStatus enum to allow dynamic status values
@@ -194,6 +195,16 @@ model Message {
   from       String
   body       String        
   attachments Json?        @default("[]") // Store B2 file metadata
+  threadId   String?       // Gmail thread ID for follow-ups
+  gmailMessageId String?   // Stored Message-ID header for threading
+  gmailReferences String?  // Space-separated list of Message-IDs in this thread
+  previousMessageId String? @map("previous_message_id")
+  previousMessage   Message? @relation("MessageThread", fields: [previousMessageId], references: [id])
+  replies           Message[] @relation("MessageThread")
+  scheduledFor DateTime?   // When to send scheduled emails
+  jobId      String?       // BullMQ job ID for cancellation
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
+
+  @@index([previousMessageId])
 }

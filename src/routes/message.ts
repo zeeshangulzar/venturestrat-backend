@@ -6,6 +6,7 @@ import { google } from "googleapis";
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { load } from 'cheerio';
 import { uploadFile, getFileUrl, generateUploadUrl, deleteFile } from '../services/storage.js';
+import { scheduleEmail, cancelScheduledEmail, ScheduledEmailJob } from '../services/emailQueue.js';
 
 // Utility function to format file sizes
 const formatFileSize = (bytes: number): string => {
@@ -18,6 +19,51 @@ const formatFileSize = (bytes: number): string => {
 
 const router = Router();
 const prisma = new PrismaClient();
+
+const previousMessageSelect = {
+  id: true,
+  threadId: true,
+  gmailMessageId: true,
+  gmailReferences: true,
+} as const;
+
+function mergeReferences(...refs: (string | null | undefined)[]): string | null {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    if (!ref) continue;
+    const parts = ref.trim().split(/\s+/).filter(Boolean);
+    for (const part of parts) {
+      if (!seen.has(part)) {
+        seen.add(part);
+        ordered.push(part);
+      }
+    }
+  }
+  return ordered.length ? ordered.join(' ') : null;
+}
+
+function parseReferences(value?: string | null): {
+  referencesHeader?: string;
+  parentMessageId?: string;
+  referenceIds: string[];
+} {
+  const trimmed = value?.trim();
+  if (!trimmed) return { referenceIds: [] };
+  const referenceIds = trimmed.split(/\s+/).filter(Boolean);
+  return {
+    referencesHeader: referenceIds.length ? referenceIds.join(' ') : undefined,
+    parentMessageId: referenceIds.length ? referenceIds[referenceIds.length - 1] : undefined,
+    referenceIds,
+  };
+}
+
+const MESSAGE_ID_DOMAIN = process.env.EMAIL_MESSAGE_ID_DOMAIN || 'venturestrat.ai';
+function generateMessageId(): string {
+  const timestampPart = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `<${timestampPart}-${randomPart}@${MESSAGE_ID_DOMAIN}>`;
+}
 
 // Initialize SendGrid
 sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
@@ -256,7 +302,7 @@ router.post('/message/:messageId/attachments/add', async (req, res) => {
   }
 });
 
-async function sendViaGmail(accessToken: string, message: any, attachmentLinks: any[]) {
+async function sendViaGmail(accessToken: string, message: any, attachmentLinks: any[], replyThreadId?: string | null, mergedReferences?: string | null): Promise<{ threadId: string | null; messageId: string | null }> {
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: accessToken });
 
@@ -283,12 +329,17 @@ async function sendViaGmail(accessToken: string, message: any, attachmentLinks: 
     `;
   }
 
+  const { referencesHeader, parentMessageId } = parseReferences(mergedReferences);
+  const messageIdHeader = generateMessageId();
   const headerLines = [
     `To: ${toRecipients.join(", ")}`,
     ...(ccRecipients.length > 0 ? [`Cc: ${ccRecipients.join(", ")}`] : []),
     `From: ${fromHeader}`,
     ...(replyToAddress ? [`Reply-To: ${replyToAddress}`] : []),
     `Subject: ${message.subject}`,
+    `Message-ID: ${messageIdHeader}`,
+    ...(parentMessageId ? [`In-Reply-To: ${parentMessageId}`] : []),
+    ...(referencesHeader ? [`References: ${referencesHeader}`] : []),
   ];
 
   // Use simple HTML email without attachments (download links are in the content)
@@ -310,13 +361,21 @@ async function sendViaGmail(accessToken: string, message: any, attachmentLinks: 
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 
-  return await gmail.users.messages.send({
+  const requestBody: any = { raw: encodedMessage };
+  if (replyThreadId) requestBody.threadId = replyThreadId;
+
+  const response = await gmail.users.messages.send({
     userId: "me",
-    requestBody: { raw: encodedMessage },
+    requestBody,
   });
+
+  return {
+    threadId: response.data.threadId || replyThreadId || null,
+    messageId: messageIdHeader,
+  };
 }
 
-async function sendViaMicrosoftGraph(accessToken: string, message: any, attachmentLinks: any[]) {
+async function sendViaMicrosoftGraph(accessToken: string, message: any, attachmentLinks: any[], replyThreadId?: string | null, mergedReferences?: string | null): Promise<{ threadId: string | null; messageId: string | null }> {
   let cleanedBody = cleanEmailBody(message.body);
 
   const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
@@ -338,6 +397,7 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
   }
 
   // Prepare Microsoft Graph email message
+  const { referencesHeader, parentMessageId } = parseReferences(mergedReferences);
   const emailMessage = {
     message: {
       subject: message.subject,
@@ -393,7 +453,10 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
     throw new Error(`Microsoft Graph API error: ${response.status} - ${JSON.stringify(errorData)}`);
   }
 
-  return response;
+  return {
+    threadId: replyThreadId || message.threadId || null,
+    messageId: null,
+  };
 }
 // Function to clean email body for proper HTML formatting
 // Comprehensive font family mapping for email client compatibility
@@ -518,7 +581,7 @@ const ensureStyleTerminated = (style: string): string => {
 };
 
 // Detect which Google Fonts are used in the email content
-function detectGoogleFonts(htmlContent: string): string[] {
+export function detectGoogleFonts(htmlContent: string): string[] {
   console.log('detectGoogleFonts called with content length:', htmlContent.length);
   
   const googleFontNames = [
@@ -557,7 +620,7 @@ function detectGoogleFonts(htmlContent: string): string[] {
 }
 
 // Generate complete HTML email with Google Fonts support
-function generateEmailHTML(body: string, googleFonts: string[]): string {
+export function generateEmailHTML(body: string, googleFonts: string[]): string {
   let html = `
     <!DOCTYPE html>
     <html>
@@ -633,7 +696,7 @@ function generateEmailHTML(body: string, googleFonts: string[]): string {
   return html;
 }
 
-function cleanEmailBody(body: string): string {
+export function cleanEmailBody(body: string): string {
   console.log('Original email body:', body);
   const $ = load(body);
 
@@ -746,8 +809,11 @@ router.post('/message', async (req, res) => {
       }
     } else {
       // Always create new for SENT or FAILED
+      const enumStatus = (['DRAFT','SENT','FAILED','ANSWERED','SCHEDULED'] as const).includes(status as any)
+        ? (status as any)
+        : 'DRAFT';
       message = await prisma.message.create({
-        data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body,  status }
+        data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body,  status: enumStatus }
       });
     }
 
@@ -777,6 +843,8 @@ router.put('/message/:messageId', async (req, res) => {
     }
 
     // Update the message
+    const enumStatus = status !== undefined ? (status as any) : undefined;
+
     const updatedMessage = await prisma.message.update({
       where: { id: messageId },
       data: {
@@ -787,7 +855,7 @@ router.put('/message/:messageId', async (req, res) => {
         ...(subject !== undefined && { subject }),
         ...(from !== undefined && { from }),
         ...(body !== undefined && { body }),
-        ...(status !== undefined && { status: status as 'DRAFT' | 'SENT' | 'FAILED' })
+        ...(enumStatus !== undefined && { status: enumStatus as 'DRAFT' | 'SENT' | 'FAILED' | 'ANSWERED' | 'SCHEDULED' })
       }
     });
 
@@ -1045,6 +1113,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       where: { id: messageId },
       include: {
         user: true,
+        previousMessage: { select: previousMessageSelect },
       },
     });
 
@@ -1112,15 +1181,24 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       }
     }
 
+    const mergedRefs = mergeReferences(
+      message.gmailReferences,
+      message.previousMessage?.gmailReferences,
+      message.previousMessage?.gmailMessageId,
+    );
+    const replyThreadId = message.threadId || message.previousMessage?.threadId || null;
+
+    let providerResult: { threadId: string | null; messageId: string | null } = { threadId: replyThreadId, messageId: null };
+
     if (googleTokens?.data && googleTokens.data.length > 0) {
       // --- Use Gmail API ---
       const accessToken = googleTokens.data[0].token;
-      await sendViaGmail(accessToken, message, emailAttachments);
+      providerResult = await sendViaGmail(accessToken, message, emailAttachments, replyThreadId, mergedRefs);
       console.log('Email sent via Gmail API');
     } else if (microsoftTokens?.data && microsoftTokens.data.length > 0) {
       // --- Use Microsoft Graph API ---
       const accessToken = microsoftTokens.data[0].token;
-      await sendViaMicrosoftGraph(accessToken, message, emailAttachments);
+      providerResult = await sendViaMicrosoftGraph(accessToken, message, emailAttachments, replyThreadId, mergedRefs);
       console.log('Email sent via Microsoft Graph API');
     } else {
       // --- Fallback to SendGrid ---
@@ -1163,12 +1241,17 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       // Send email via SendGrid
       await sgMail.send(emailData);
       console.log('Email sent via SendGrid');
+      providerResult = { threadId: replyThreadId, messageId: null };
     }
 
-    // Update message status to SENT and store B2 attachment metadata
+    // Update message with threading metadata and attachments
+    const finalReferences = mergeReferences(mergedRefs, providerResult.messageId);
     const updateData: any = { 
       status: 'SENT',
-      attachments: b2Attachments // Store B2 file metadata
+      attachments: b2Attachments,
+      ...(providerResult.threadId ? { threadId: providerResult.threadId } : {}),
+      ...(providerResult.messageId ? { gmailMessageId: providerResult.messageId } : {}),
+      ...(finalReferences !== null ? { gmailReferences: finalReferences } : {}),
     };
     
     const updatedMessage = await prisma.message.update({
@@ -1203,9 +1286,9 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     
     // Update message status to DRAFT if it's a SendGrid error
     if (error.response) {
-      await prisma.message.update({
+    await prisma.message.update({
         where: { id: messageId },
-        data: { status: 'DRAFT' }
+      data: { status: 'DRAFT' }
       });
     }
 
@@ -1275,4 +1358,275 @@ router.get('/message/:messageId', async (req, res) => {
   }
 });
 
+// Create a scheduled follow-up email
+router.post('/message/schedule', async (req, res) => {
+  const { userId, investorId, to, cc, subject, from, body, scheduledFor, threadId, previousMessageId } = req.body;
+
+  try {
+    // Validate required fields
+    if (!userId || !investorId || !to || !subject || !from || !body || !scheduledFor) {
+      return res.status(400).json({
+        error: 'Missing required fields: userId, investorId, to, subject, from, body, scheduledFor'
+      });
+    }
+
+    const scheduledDate = new Date(scheduledFor);
+    if (isNaN(scheduledDate.getTime()) || scheduledDate <= new Date()) {
+      return res.status(400).json({ error: 'Scheduled time must be in the future' });
+    }
+
+    // Ensure user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Inherit thread and references if a previousMessageId is provided
+    let inheritedThreadId: string | null = threadId || null;
+    let inheritedReferences: string | null = null;
+    let referenceSourceId: string | null = null;
+
+    if (previousMessageId) {
+      const prev = await prisma.message.findUnique({
+        where: { id: previousMessageId },
+        select: previousMessageSelect,
+      });
+      if (!prev) {
+        return res.status(404).json({ error: 'Previous message not found' });
+      }
+      inheritedThreadId = inheritedThreadId ?? prev.threadId ?? null;
+      inheritedReferences = mergeReferences(prev.gmailReferences, prev.gmailMessageId);
+      referenceSourceId = prev.id;
+    }
+
+    // Create the scheduled message
+    const message = await prisma.message.create({
+      data: {
+        userId,
+        investorId,
+        to: Array.isArray(to) ? to : [to],
+        cc: Array.isArray(cc) ? cc : (cc ? String(cc).split(',').map((e: string) => e.trim()) : []),
+        subject,
+        from,
+        body,
+        status: 'SCHEDULED',
+        scheduledFor: scheduledDate,
+        threadId: inheritedThreadId,
+        gmailReferences: inheritedReferences,
+        previousMessageId: referenceSourceId,
+      }
+    });
+
+    // Schedule the BullMQ job
+    const job = await scheduleEmail(scheduledDate, {
+      messageId: message.id,
+      userId,
+      investorId,
+      to: message.to,
+      cc: message.cc,
+      subject,
+      from,
+      body,
+      threadId: inheritedThreadId || undefined,
+      previousMessageId: referenceSourceId,
+    } as ScheduledEmailJob);
+
+    // Save jobId for potential cancellation
+    await prisma.message.update({
+      where: { id: message.id },
+      data: { jobId: job.id }
+    });
+
+    res.status(201).json({
+      message: 'Message scheduled successfully',
+      data: { ...message, jobId: job.id }
+    });
+  } catch (error) {
+    console.error('Error scheduling message:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Get all scheduled messages for a user
+router.get('/messages/scheduled/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const scheduledMessages = await prisma.message.findMany({
+      where: { userId, status: 'SCHEDULED' },
+      orderBy: { scheduledFor: 'asc' },
+    });
+    
+
+    res.json({
+      message: 'Scheduled messages retrieved successfully',
+      count: scheduledMessages.length,
+      data: scheduledMessages,
+    });
+  } catch (error) {
+    console.error('Error fetching scheduled messages:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;
+// Send a scheduled email immediately (send as reply in existing thread)
+router.post('/message/:messageId/send-reply', upload.any(), async (req, res) => {
+  const { messageId } = req.params;
+  try {
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      include: {
+        user: true,
+        previousMessage: { select: previousMessageSelect },
+      },
+    });
+
+    if (!message) return res.status(404).json({ error: 'Message not found' });
+    if (message.status !== 'SCHEDULED') {
+      return res.status(400).json({ error: 'Message is not scheduled' });
+    }
+
+    // Prepare threading only from linked previous message (no fallback, no mutations)
+    const prev = message.previousMessage ?? (message.previousMessageId
+      ? await prisma.message.findUnique({ where: { id: message.previousMessageId }, select: previousMessageSelect })
+      : null);
+    const mergedRefs = mergeReferences(prev?.gmailReferences, prev?.gmailMessageId);
+    const replyThreadId = prev?.threadId || message.threadId || null;
+
+    // Determine provider tokens
+    let googleTokens: any;
+    let microsoftTokens: any;
+    try {
+      googleTokens = await clerkClient.users.getUserOauthAccessToken(message.userId, 'oauth_google');
+    } catch {}
+    if (!googleTokens?.data?.length) {
+      try {
+        microsoftTokens = await clerkClient.users.getUserOauthAccessToken(message.userId, 'oauth_microsoft');
+      } catch {}
+    }
+
+    // Collect any attachments from request metadata (optional)
+    const emailAttachments: Array<{ filename: string; type: string; size: number; url: string }> = [];
+    const raw = (req.body && (req.body.attachments ?? req.body.attachmentMetadata)) || null;
+    const arr = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    for (const meta of arr) {
+      if (!meta) continue;
+      const filename = meta.filename || meta.name || 'attachment';
+      const type = meta.type || meta.contentType || 'application/octet-stream';
+      const size = Number(meta.size) || 0;
+      const url = meta.url;
+      if (url) emailAttachments.push({ filename, type, size, url });
+    }
+
+    let providerResult: { threadId: string | null; messageId: string | null } = { threadId: replyThreadId, messageId: null };
+    if (googleTokens?.data?.length) {
+      providerResult = await sendViaGmail(googleTokens.data[0].token, message, emailAttachments, replyThreadId, mergedRefs);
+    } else if (microsoftTokens?.data?.length) {
+      providerResult = await sendViaMicrosoftGraph(microsoftTokens.data[0].token, message, emailAttachments, replyThreadId, mergedRefs);
+    } else {
+      // SendGrid fallback
+      const cleanBody = cleanEmailBody(message.body);
+      const googleFonts = detectGoogleFonts(cleanBody);
+      const htmlContent = generateEmailHTML(cleanBody, googleFonts);
+      const { referencesHeader, parentMessageId } = parseReferences(mergedRefs);
+      const headers: Record<string, string> = {};
+      if (parentMessageId) headers['In-Reply-To'] = parentMessageId;
+      if (referencesHeader) headers['References'] = referencesHeader;
+      const emailData: any = {
+        to: Array.isArray(message.to) ? message.to : [message.to],
+        ...(message.cc?.length ? { cc: message.cc } : {}),
+        from: { email: 'info@venturestrat.ai', name: `${message.user.firstname ?? ''} ${message.user.lastname ?? ''}`.trim() },
+        replyTo: message.from,
+        subject: message.subject,
+        html: htmlContent,
+      };
+      if (Object.keys(headers).length) emailData.headers = headers;
+      await sgMail.send(emailData);
+      providerResult = { threadId: replyThreadId, messageId: null };
+    }
+
+    const updatedMessage = await prisma.message.update({
+      where: { id: message.id },
+      data: {
+        status: 'SENT',
+        scheduledFor: null,
+        jobId: null,
+      },
+    });
+
+    // Cancel the delayed job only after a successful send
+    if (message.jobId) {
+      try {
+        await cancelScheduledEmail(message.jobId);
+      } catch (e) {
+        console.warn('Failed to cancel scheduled job after send:', e);
+      }
+    }
+
+    res.json({ message: 'Scheduled email sent as reply successfully!', data: updatedMessage });
+  } catch (error: any) {
+    console.error('Error sending scheduled email reply:', error);
+    // Mirror send() error response style
+    let errorMessage = 'Failed to send email. Please try again.';
+    let statusCode = 500;
+
+    if (error?.code === 'LIMIT_FILE_SIZE') {
+      errorMessage = 'File size too large. Please select files smaller than 75MB.';
+      statusCode = 413;
+    } else if (error?.code === 'LIMIT_FILE_COUNT') {
+      errorMessage = 'Too many files attached. Please reduce the number of attachments.';
+      statusCode = 413;
+    } else if (error?.code === 'LIMIT_UNEXPECTED_FILE') {
+      errorMessage = 'Invalid file type detected. Please check your attachments.';
+      statusCode = 400;
+    } else if (error?.response?.status === 413) {
+      errorMessage = 'Request too large. Please reduce file sizes and try again.';
+      statusCode = 413;
+    } else if (error?.message?.includes('network') || error?.message?.includes('timeout')) {
+      errorMessage = 'Network error occurred. Please check your connection and try again.';
+      statusCode = 503;
+    } else if (error?.message?.includes('authentication') || error?.message?.includes('unauthorized')) {
+      errorMessage = 'Authentication failed. Please reconnect your account from settings page';
+      statusCode = 401;
+    } else if (error?.response?.body?.errors) {
+      const sendGridErrors = error.response.body.errors;
+      if (Array.isArray(sendGridErrors) && sendGridErrors.length > 0) {
+        errorMessage = `Email sending failed: ${sendGridErrors[0].message}`;
+      }
+    }
+
+    // IMPORTANT: do NOT change message status/job/schedule on failure (keep SCHEDULED)
+    return res.status(statusCode).json({
+      error: 'Failed to send email',
+      message: errorMessage,
+      details: error?.response?.body?.errors || error?.message,
+      statusCode: error?.code,
+      fullError: error?.response?.data
+    });
+  }
+});
+
+// Cancel a scheduled message (revert to draft and remove job)
+router.post('/message/:messageId/cancel', async (req, res) => {
+  const { messageId } = req.params;
+  try {
+    const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) return res.status(404).json({ error: 'Message not found' });
+    if (message.status !== 'SCHEDULED') return res.status(400).json({ error: 'Message is not scheduled' });
+
+    if (message.jobId) {
+      try {
+        await cancelScheduledEmail(message.jobId);
+      } catch (e) {
+        console.warn('Failed to cancel job:', e);
+      }
+    }
+
+    await prisma.message.update({ where: { id: messageId }, data: { status: 'DRAFT', jobId: null, scheduledFor: null } });
+    res.json({ message: 'Scheduled message cancelled successfully' });
+  } catch (error: any) {
+    console.error('Error cancelling scheduled message:', error);
+    res.status(500).json({ error: 'Failed to cancel scheduled message', details: error?.message });
+  }
+});
