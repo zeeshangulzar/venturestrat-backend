@@ -11,7 +11,7 @@ import messageRoutes from './routes/message.js'
 import onboardingRoutes from './routes/onboarding.js'
 import './workers/emailWorker.js';
 import { createBullBoard } from '@bull-board/api';
-import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
 import { ExpressAdapter } from '@bull-board/express';
 import { emailQueue, queueEvents } from './services/emailQueue.js';
 // import verifyUser from 'middleware/verifyUser';
