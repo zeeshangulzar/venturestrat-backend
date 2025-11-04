@@ -4,6 +4,7 @@ import { PrismaClient, MessageStatus } from '@prisma/client';
 import { Webhook } from 'svix';
 import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
+import { cancelScheduledEmail } from '../services/emailQueue.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -242,6 +243,43 @@ const isInsufficientScopeError = (error: any): boolean => {
 };
 
 // Helper function to create ANSWERED message and update shortlist
+const cancelScheduledFollowUps = async (originalMessage: any) => {
+  try {
+    const scheduledMessages = await prisma.message.findMany({
+      where: {
+        status: MessageStatus.SCHEDULED,
+        previousMessageId: originalMessage.id,
+      },
+    });
+
+    if (!scheduledMessages.length) {
+      return;
+    }
+
+    console.log(`Found ${scheduledMessages.length} scheduled follow-ups to cancel for message ${originalMessage.id}`);
+
+    for (const scheduledMessage of scheduledMessages) {
+      if (scheduledMessage.jobId) {
+        try {
+          await cancelScheduledEmail(scheduledMessage.jobId);
+          console.log(`Cancelled scheduled job ${scheduledMessage.jobId} for message ${scheduledMessage.id}`);
+        } catch (error) {
+          console.warn(`Failed to cancel scheduled job ${scheduledMessage.jobId}:`, error);
+        }
+      }
+
+      try {
+        await prisma.message.delete({ where: { id: scheduledMessage.id } });
+        console.log(`Deleted scheduled follow-up message ${scheduledMessage.id}`);
+      } catch (error) {
+        console.warn(`Failed to delete scheduled follow-up message ${scheduledMessage.id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Error cancelling scheduled follow-up messages:', error);
+  }
+};
+
 const createAnsweredMessage = async (params: {
   originalMessage: any;
   senderEmail: string;
@@ -251,6 +289,7 @@ const createAnsweredMessage = async (params: {
   ccAddresses: string[];
   emailAddress?: string;
   isFallback?: boolean;
+  threadId?: string | null;
 }) => {
   const {
     originalMessage,
@@ -260,7 +299,8 @@ const createAnsweredMessage = async (params: {
     recipientCandidates,
     ccAddresses,
     emailAddress,
-    isFallback = false
+    isFallback = false,
+    threadId = null,
   } = params;
 
   console.log(`Found SENT message via ${isFallback ? 'fallback' : 'primary'} matching, checking for duplicate ANSWERED message:`, {
@@ -1356,6 +1396,28 @@ router.post('/webhooks/gmail-notification', async (req, res) => {
 
       // First, try to find a SENT message where the sender of the reply matches the recipient of the original message
       // and the recipient of the reply matches the sender of the original message
+      if (threadId) {
+        const threadMatchedMessage = await prisma.message.findFirst({
+          where: {
+            status: MessageStatus.SENT,
+            threadId,
+          },
+          orderBy: { createdAt: 'desc' },
+          include: {
+            user: true,
+            investor: true,
+          },
+        });
+
+        if (threadMatchedMessage) {
+          const result = await cancelScheduledFollowUps(threadMatchedMessage);
+          console.log('Gmail notification matched by threadId, processed successfully: cancel scedule email', result);
+
+          res.status(200).json(result);
+          return;
+        }
+      }
+
       const existingSentMessage = await prisma.message.findFirst({
         where: {
           status: MessageStatus.SENT,
@@ -1383,6 +1445,7 @@ router.post('/webhooks/gmail-notification', async (req, res) => {
         }
       });
 
+      console.log("thread id", threadId);
       if (existingSentMessage) {
         const result = await createAnsweredMessage({
           originalMessage: existingSentMessage,
