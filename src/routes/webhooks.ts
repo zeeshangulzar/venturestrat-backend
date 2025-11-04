@@ -1412,9 +1412,6 @@ router.post('/webhooks/gmail-notification', async (req, res) => {
         if (threadMatchedMessage) {
           const result = await cancelScheduledFollowUps(threadMatchedMessage);
           console.log('Gmail notification matched by threadId, processed successfully: cancel scedule email', result);
-
-          res.status(200).json(result);
-          return;
         }
       }
 
