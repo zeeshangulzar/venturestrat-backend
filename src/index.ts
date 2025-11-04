@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from 'dotenv';
 import multer from 'multer';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, MessageStatus } from '@prisma/client';
 import investorRoutes from './routes/investor.js';
 import userRoutes from './routes/user.js';
 import shortlistRoutes from './routes/shortlist.js'
@@ -63,6 +63,15 @@ queueEvents.on('removed', async ({ jobId }) => {
   }
 
   try {
+    const existingMessage = await prisma.message.findUnique({
+      where: { id: jobId.toString() },
+    });
+
+    if (!existingMessage) {
+      console.log(`🗑️  Queue job ${jobId} removed – no corresponding message found (likely already deleted).`);
+      return;
+    }
+
     await prisma.message.update({
       where: { id: jobId.toString() },
       data: {
