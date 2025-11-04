@@ -66,7 +66,6 @@ queueEvents.on('removed', async ({ jobId }) => {
     await prisma.message.update({
       where: { id: jobId.toString() },
       data: {
-        status: 'DRAFT',
         scheduledFor: null,
       },
     });
