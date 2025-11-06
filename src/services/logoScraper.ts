@@ -19,7 +19,8 @@ const logoSelectors = [
   { selector: '.brand svg', description: 'SVG inside .brand container' },
   { selector: 'svg[id*="logo" i]', description: 'SVG with "logo" in ID' },
   
-  // Image selectors
+  // Image selectors (prioritized - most specific first)
+  { selector: '.navbar-brand img', description: 'Images inside .navbar-brand (most common logo location)' },
   { selector: 'img[alt*="logo" i]', description: 'Images with "logo" in alt text' },
   { selector: 'img[class*="logo" i]', description: 'Images with "logo" in class' },
   { selector: 'img[id*="logo" i]', description: 'Images with "logo" in ID' },
@@ -27,8 +28,8 @@ const logoSelectors = [
   { selector: '.logo img', description: 'Images inside .logo container' },
   { selector: '#logo img', description: 'Images inside #logo container' },
   { selector: '.header img', description: 'Images inside .header container' },
-  { selector: '.navbar img', description: 'Images inside .navbar container' },
   { selector: '.brand img', description: 'Images inside .brand container' },
+  { selector: '.navbar img', description: 'Images inside .navbar container' },
   { selector: '.site-header img', description: 'Images inside .site-header container' },
   { selector: '.main-header img', description: 'Images inside .main-header container' },
   { selector: 'img[src*="logo"]', description: 'Images with "logo" in src' },
@@ -176,7 +177,7 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
             allFoundImages.push(imageData);
             
             // Check if this is a third-party logo and log it
-            if (isThirdPartyLogo(absoluteUrl)) {
+            if (isThirdPartyLogo(absoluteUrl, domainName)) {
               console.log(`⏭️  Skipping third-party logo: ${absoluteUrl.substring(0, 80)}...`);
             }
             
@@ -323,46 +324,88 @@ const THIRD_PARTY_DOMAINS = [
   'cloudflare.com',
   'jsdelivr.net',
   'cdnjs.cloudflare.com',
-  'unpkg.com',
-  'badge',
-  'icon-',
-  'social',
-  'share'
+  'unpkg.com'
+];
+
+const THIRD_PARTY_PATH_PATTERNS: RegExp[] = [
+  /\/badges?\b/,
+  /\bbadge[-_]/,
+  // Only exclude /icons/ folders if they contain social media icons
+  /\/icons?\/(whatsapp|facebook|twitter|instagram|linkedin|youtube|social|share|contact)/i,
+  /\bicon[-_]?(whatsapp|facebook|twitter|instagram|linkedin|youtube|social|share)/i,
+  /\bsocial[-_/]/,
+  /\/social\//,
+  /\bshare[-_/]/,
+  /(?:\?|&)share=/,
+  /(?:\?|&)social=/,
+  /powered[-_]?by/,
+  // Social media icons (explicit patterns)
+  /\/whatsapp/i,
+  /whatsapp[-_]/i,
+  /facebook[-_]/i,
+  /\/facebook/i,
+  /twitter[-_]/i,
+  /\/twitter/i,
+  /instagram[-_]/i,
+  /\/instagram/i,
+  /linkedin[-_]/i,
+  /\/linkedin/i,
+  /youtube[-_]/i,
+  /\/youtube/i,
+  /\/social[-_]media/i,
+  /\/contact[-_]icons/i
 ];
 
 // Helper function to check if URL is from a third-party (not the company logo)
-function isThirdPartyLogo(url: string): boolean {
+function isThirdPartyLogo(url: string, domainName?: string): boolean {
   const urlLower = url.toLowerCase();
-  
-  // Check against known third-party domains
+
+  if (domainName) {
+    const normalizedDomain = domainName.toLowerCase();
+    const normalizedDomainClean = normalizedDomain.replace(/[^a-z0-9]/g, '');
+    const urlClean = urlLower.replace(/[^a-z0-9]/g, '');
+
+    if (urlLower.includes(normalizedDomain) || urlClean.includes(normalizedDomainClean)) {
+      return false;
+    }
+  }
+
+  let hostname = '';
+  let path = '';
+
+  try {
+    const parsed = new URL(url);
+    hostname = parsed.hostname.toLowerCase();
+    path = `${parsed.pathname}${parsed.search}${parsed.hash}`.toLowerCase();
+  } catch {
+    hostname = '';
+    path = urlLower;
+  }
+
   for (const domain of THIRD_PARTY_DOMAINS) {
-    if (urlLower.includes(domain)) {
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) {
       return true;
     }
   }
-  
-  // Check for common non-logo patterns
-  if (urlLower.includes('social-') || 
-      urlLower.includes('share-') || 
-      urlLower.includes('badge-') ||
-      urlLower.includes('/badges/') ||
-      urlLower.includes('/icons/') ||
-      urlLower.includes('powered-by') ||
-      urlLower.includes('poweredby')) {
-    return true;
+
+  const pathHaystack = `${hostname}${path}`;
+  for (const pattern of THIRD_PARTY_PATH_PATTERNS) {
+    if (pattern.test(pathHaystack)) {
+      return true;
+    }
   }
-  
+
   return false;
 }
 
 // Helper function to determine if an image is likely a logo (from batch test)
-function isLikelyLogo(url: string, alt?: string, className?: string): boolean {
+function isLikelyLogo(url: string, alt?: string, className?: string, domainName?: string): boolean {
   const urlLower = url.toLowerCase();
   const altLower = (alt || '').toLowerCase();
   const classLower = (className || '').toLowerCase();
   
   // Exclude third-party logos first
-  if (isThirdPartyLogo(url)) {
+  if (isThirdPartyLogo(url, domainName)) {
     return false;
   }
   
@@ -392,7 +435,7 @@ function getLogoScore(image: { url: string; alt: string; class: string; selector
   const selectorLower = image.selector.toLowerCase();
   
   // HEAVILY penalize third-party logos
-  if (isThirdPartyLogo(image.url)) {
+  if (isThirdPartyLogo(image.url, domainName)) {
     return -1000; // Basically exclude these
   }
   
@@ -414,6 +457,11 @@ function getLogoScore(image: { url: string; alt: string; class: string; selector
     }
   }
   
+  // MASSIVE boost for navbar-brand (most common logo location)
+  if (selectorLower.includes('navbar-brand')) {
+    score += 150; // HUGE boost - this is almost always the company logo
+  }
+  
   // HEAVILY BOOST logos in header/navbar (most likely to be company logo)
   if (selectorLower.includes('header') || 
       selectorLower.includes('navbar') || 
@@ -431,14 +479,22 @@ function getLogoScore(image: { url: string; alt: string; class: string; selector
     score += 30;
   }
   
+  // MASSIVE boost if alt text explicitly says "logo"
+  if (altLower.includes('logo')) {
+    score += 50; // Very high boost for explicit logo alt text
+  }
+  
   // URL-based scoring
   if (urlLower.includes('logo')) score += 10;
   if (urlLower.includes('brand')) score += 8;
   if (urlLower.includes('header')) score += 6;
   if (urlLower.includes('favicon')) score += 4;
-  if (urlLower.includes('icon')) score += 3;
+  // Only give small boost for "icon" if it's not in a social icons folder
+  if (urlLower.includes('icon') && !urlLower.includes('/icons/') && !urlLower.match(/icon[s]?[-_](whatsapp|facebook|twitter|instagram|linkedin|youtube)/i)) {
+    score += 3;
+  }
   
-  // Alt text scoring
+  // Alt text scoring (already boosted above, but keep this for consistency)
   if (altLower.includes('logo')) score += 10;
   if (altLower.includes('brand')) score += 8;
   if (altLower.includes('header')) score += 6;
@@ -449,8 +505,25 @@ function getLogoScore(image: { url: string; alt: string; class: string; selector
   if (classLower.includes('header')) score += 6;
   if (classLower.includes('navbar') || classLower.includes('nav-')) score += 8;
   
-  // Penalize social/share icons
-  if (altLower.includes('social') || altLower.includes('share') || altLower.includes('follow')) {
+  // HEAVILY penalize social/share icons in URLs
+  if (urlLower.includes('whatsapp') || 
+      urlLower.includes('facebook') || 
+      urlLower.includes('twitter') || 
+      urlLower.includes('instagram') || 
+      urlLower.includes('linkedin') || 
+      urlLower.includes('youtube') ||
+      urlLower.includes('/icons/whatsapp') ||
+      urlLower.includes('/icons/facebook') ||
+      urlLower.includes('/icons/twitter') ||
+      urlLower.includes('/icons/instagram') ||
+      urlLower.includes('/icons/linkedin') ||
+      urlLower.includes('/icons/youtube')) {
+    score -= 200; // HEAVY penalty for social media icons
+  }
+  
+  // Penalize social/share icons in alt/class
+  if (altLower.includes('social') || altLower.includes('share') || altLower.includes('follow') ||
+      altLower.includes('whatsapp') || altLower.includes('facebook') || altLower.includes('twitter')) {
     score -= 50;
   }
   
