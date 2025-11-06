@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
-import sgMail from '@sendgrid/mail';
+import nodemailer, { Transporter, SendMailOptions } from 'nodemailer';
 import multer from 'multer';
 import { google } from "googleapis";
 import { clerkClient } from '@clerk/clerk-sdk-node';
@@ -19,6 +19,28 @@ const formatFileSize = (bytes: number): string => {
 
 const router = Router();
 const prisma = new PrismaClient();
+
+const gmailUser = process.env.GMAIL_USER;
+const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+let sharedTransporter: Transporter | null = null;
+
+export function getNodemailerTransport(): Transporter {
+  if (!gmailUser || !gmailAppPassword) {
+    throw new Error('Email transport not configured. Please set GMAIL_USER and GMAIL_APP_PASSWORD.');
+  }
+
+  if (!sharedTransporter) {
+    sharedTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: gmailUser,
+        pass: gmailAppPassword,
+      },
+    });
+  }
+
+  return sharedTransporter;
+}
 
 const previousMessageSelect = {
   id: true,
@@ -65,9 +87,6 @@ function generateMessageId(): string {
   return `<${timestampPart}-${randomPart}@${MESSAGE_ID_DOMAIN}>`;
 }
 
-// Initialize SendGrid
-sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
-
 // Configure multer for handling file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -90,6 +109,13 @@ type AttachmentMetadata = {
   type: string;
   size: number;
   url: string | null;
+};
+
+type AttachmentLink = {
+  filename: string;
+  type: string;
+  size: number;
+  url?: string | null;
 };
 
 const normalizeAttachmentMetadata = (attachment: any): AttachmentMetadata => {
@@ -458,6 +484,79 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
     messageId: null,
   };
 }
+
+export async function sendViaNodemailerFallback(
+  message: any,
+  attachmentLinks: AttachmentLink[] = [],
+  mergedReferences?: string | null,
+): Promise<{ threadId: string | null; messageId: string | null }> {
+  const cleanBody = cleanEmailBody(message.body);
+  const googleFonts = detectGoogleFonts(cleanBody);
+  let htmlContent = generateEmailHTML(cleanBody, googleFonts);
+
+  const linksWithUrl = attachmentLinks.filter((att) => att?.url);
+  if (linksWithUrl.length > 0) {
+    const attachmentSection = linksWithUrl
+      .map((att) => {
+        const safeUrl = att.url as string;
+        return `<p>📎 ${att.filename} (${formatFileSize(att.size)}) - <a href="${safeUrl}">Download</a></p>`;
+      })
+      .join('');
+
+    const sectionHtml = `
+      <p><strong>Attachments:</strong></p>
+      ${attachmentSection}
+    `;
+
+    htmlContent = htmlContent.includes('</body>')
+      ? htmlContent.replace('</body>', `${sectionHtml}</body>`)
+      : `${htmlContent}${sectionHtml}`;
+  }
+
+  const referencesSource = mergedReferences ?? message.gmailReferences ?? null;
+  const { referencesHeader, parentMessageId } = parseReferences(referencesSource);
+
+  const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
+  const ccRecipients = Array.isArray(message.cc)
+    ? message.cc
+    : message.cc
+      ? String(message.cc).split(',').map((email: string) => email.trim()).filter(Boolean)
+      : [];
+
+  const transport = getNodemailerTransport();
+  const senderName = buildSenderDisplayName(message.user, gmailUser || message.from);
+  const fromAddress = gmailUser!;
+
+  const mailOptions: SendMailOptions = {
+    to: toRecipients,
+    from: `"${senderName}" <${fromAddress}>`,
+    replyTo: message.from,
+    subject: message.subject,
+    html: htmlContent,
+  };
+
+  if (ccRecipients.length > 0) {
+    mailOptions.cc = ccRecipients;
+  }
+
+  const headers: Record<string, string> = {};
+  if (parentMessageId) {
+    headers['In-Reply-To'] = parentMessageId;
+  }
+  if (referencesHeader) {
+    headers['References'] = referencesHeader;
+  }
+  if (Object.keys(headers).length > 0) {
+    mailOptions.headers = headers;
+  }
+
+  await transport.sendMail(mailOptions);
+
+  return {
+    threadId: message.threadId || null,
+    messageId: null,
+  };
+}
 // Function to clean email body for proper HTML formatting
 // Comprehensive font family mapping for email client compatibility
 const FONT_FAMILY_MAP: Record<string, string> = {
@@ -686,10 +785,14 @@ export function generateEmailHTML(body: string, googleFonts: string[]): string {
   
   html += `
     </head>
-    <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #ffffff;">
-      <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        ${body}
-      </div>
+    <body style="margin:0; padding:0; background-color:#ffffff; font-family: Arial, Helvetica, sans-serif;">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#ffffff;">
+        <tr>
+          <td align="left" style="padding:24px; color:#0f172a; font-size:16px; line-height:1.6;">
+            ${body}
+          </td>
+        </tr>
+      </table>
     </body>
     </html>`;
   
@@ -981,13 +1084,16 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
   console.log('Received send message request for messageId:', messageId);
 
   try {
-    // Check if SendGrid API key is configured
-    if (!process.env.SENDGRID_API_KEY) {
-      return res.status(500).json({ error: 'SendGrid API key not configured' });
+    try {
+      getNodemailerTransport();
+    } catch (transportError) {
+      const message = transportError instanceof Error ? transportError.message : 'Email transport not configured';
+      return res.status(500).json({ error: message });
     }
 
-    console.log('SendGrid API Key configured:', process.env.SENDGRID_API_KEY ? 'Yes' : 'No');
-    console.log('API Key length:', process.env.SENDGRID_API_KEY?.length);
+    console.log('Nodemailer Gmail transport configured:', {
+      user: gmailUser ? 'present' : 'missing',
+    });
 
     // Parse FormData/JSON attachments
     const emailAttachments = []; // For email sending (download links)
@@ -1146,7 +1252,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
           "oauth_microsoft"
         );
       } catch (error) {
-        console.log('No Microsoft OAuth tokens found either, will use SendGrid fallback...');
+      console.log('No Microsoft OAuth tokens found either, will use Nodemailer fallback...');
       }
     }
 
@@ -1201,47 +1307,14 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       providerResult = await sendViaMicrosoftGraph(accessToken, message, emailAttachments, replyThreadId, mergedRefs);
       console.log('Email sent via Microsoft Graph API');
     } else {
-      // --- Fallback to SendGrid ---
-      const senderName = buildSenderDisplayName(message.user, message.from);
-      const emailData = {
-        to: Array.isArray(message.to) ? message.to : [message.to],
-        ...(message.cc && message.cc.length > 0 && {
-          cc: message.cc
-        }),
-        from: {
-          email: 'info@venturestrat.ai',
-          name: senderName
-        },
-        replyTo: message.from,
-        subject: message.subject,
-        text: message.body,
-        html: `
-          <div>
-            <div>
-              ${htmlContent}
-            </div>
-          </div>
-        `,
-        // No attachments - using download links instead
+      const fallbackMessage = {
+        ...message,
+        threadId: replyThreadId ?? message.threadId,
+        gmailReferences: mergedRefs ?? message.gmailReferences,
       };
 
-      console.log('Sending email via SendGrid:', {
-        to: Array.isArray(message.to) ? message.to : [message.to],
-        ...(message.cc && message.cc.length > 0 && {
-          cc: message.cc
-        }),
-        from: 'info@venturestrat.ai',
-        subject: message.subject,
-        body: cleanBody
-      });
-      
-      console.log('CC recipients:', message.cc);
-      console.log('Email data for SendGrid:', JSON.stringify(emailData, null, 2));
-
-      // Send email via SendGrid
-      await sgMail.send(emailData);
-      console.log('Email sent via SendGrid');
-      providerResult = { threadId: replyThreadId, messageId: null };
+      providerResult = await sendViaNodemailerFallback(fallbackMessage, emailAttachments, mergedRefs);
+      console.log('Email sent via Nodemailer fallback');
     }
 
     // Update message with threading metadata and attachments
@@ -1284,7 +1357,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     console.error('Error response:', error.response?.data);
     console.error('Error status:', error.code);
     
-    // Update message status to DRAFT if it's a SendGrid error
+    // Update message status to DRAFT when sending fails
     if (error.response) {
     await prisma.message.update({
         where: { id: messageId },
@@ -1315,10 +1388,14 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       errorMessage = 'Authentication failed. Please reconnect your account from settings page';
       statusCode = 401;
     } else if (error.response?.body?.errors) {
-      // SendGrid specific errors
-      const sendGridErrors = error.response.body.errors;
-      if (Array.isArray(sendGridErrors) && sendGridErrors.length > 0) {
-        errorMessage = `Email sending failed: ${sendGridErrors[0].message}`;
+      // Provider specific errors
+      const providerErrors = error.response.body.errors;
+      if (Array.isArray(providerErrors) && providerErrors.length > 0) {
+        const firstError = providerErrors[0];
+        const providerMessage = typeof firstError === 'string' ? firstError : firstError?.message;
+        if (providerMessage) {
+          errorMessage = `Email sending failed: ${providerMessage}`;
+        }
       }
     }
 
@@ -1525,25 +1602,14 @@ router.post('/message/:messageId/send-reply', upload.any(), async (req, res) => 
     } else if (microsoftTokens?.data?.length) {
       providerResult = await sendViaMicrosoftGraph(microsoftTokens.data[0].token, message, emailAttachments, replyThreadId, mergedRefs);
     } else {
-      // SendGrid fallback
-      const cleanBody = cleanEmailBody(message.body);
-      const googleFonts = detectGoogleFonts(cleanBody);
-      const htmlContent = generateEmailHTML(cleanBody, googleFonts);
-      const { referencesHeader, parentMessageId } = parseReferences(mergedRefs);
-      const headers: Record<string, string> = {};
-      if (parentMessageId) headers['In-Reply-To'] = parentMessageId;
-      if (referencesHeader) headers['References'] = referencesHeader;
-      const emailData: any = {
-        to: Array.isArray(message.to) ? message.to : [message.to],
-        ...(message.cc?.length ? { cc: message.cc } : {}),
-        from: { email: 'info@venturestrat.ai', name: `${message.user.firstname ?? ''} ${message.user.lastname ?? ''}`.trim() },
-        replyTo: message.from,
-        subject: message.subject,
-        html: htmlContent,
+      const fallbackMessage = {
+        ...message,
+        threadId: replyThreadId ?? message.threadId,
+        gmailReferences: mergedRefs ?? message.gmailReferences,
       };
-      if (Object.keys(headers).length) emailData.headers = headers;
-      await sgMail.send(emailData);
-      providerResult = { threadId: replyThreadId, messageId: null };
+
+      providerResult = await sendViaNodemailerFallback(fallbackMessage, emailAttachments, mergedRefs);
+      console.log('Email sent via Nodemailer fallback');
     }
 
     const updatedMessage = await prisma.message.update({
@@ -1590,9 +1656,13 @@ router.post('/message/:messageId/send-reply', upload.any(), async (req, res) => 
       errorMessage = 'Authentication failed. Please reconnect your account from settings page';
       statusCode = 401;
     } else if (error?.response?.body?.errors) {
-      const sendGridErrors = error.response.body.errors;
-      if (Array.isArray(sendGridErrors) && sendGridErrors.length > 0) {
-        errorMessage = `Email sending failed: ${sendGridErrors[0].message}`;
+      const providerErrors = error.response.body.errors;
+      if (Array.isArray(providerErrors) && providerErrors.length > 0) {
+        const firstError = providerErrors[0];
+        const providerMessage = typeof firstError === 'string' ? firstError : firstError?.message;
+        if (providerMessage) {
+          errorMessage = `Email sending failed: ${providerMessage}`;
+        }
       }
     }
 
