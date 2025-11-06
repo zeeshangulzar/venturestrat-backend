@@ -749,10 +749,21 @@ router.post('/webhooks/clerk', async (req, res) => {
           
           // Check if user already exists
           const existingUser = await prisma.user.findUnique({
-            where: { id: id }
+            where: { email },
           });
 
-          if (!existingUser) {
+          if (existingUser) {
+            await prisma.user.update({
+              where: { email },
+              data: {
+                id,
+                firstname: first_name || null,
+                lastname: last_name || null,
+                publicMetaData: public_metadata || null,
+              },
+            });
+            console.log(`User updated with id in database: ${id}`);
+          }else {
             await prisma.user.create({
               data: {
                 id: id,
@@ -765,8 +776,6 @@ router.post('/webhooks/clerk', async (req, res) => {
               },
             });
             console.log(`User created in database: ${id} (${email}) with role: moderator`);
-          } else {
-            console.log(`User already exists in database: ${id}`);
           }
         }
         break;
