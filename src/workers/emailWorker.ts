@@ -1,9 +1,8 @@
 import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
-import sgMail from '@sendgrid/mail';
 import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
-import { cleanEmailBody, generateEmailHTML, detectGoogleFonts } from '../routes/message.js';
+import { cleanEmailBody, sendViaNodemailerFallback } from '../routes/message.js';
 
 const prisma = new PrismaClient();
 
@@ -61,9 +60,6 @@ function mergeReferences(...refs: (string | null | undefined)[]): string | null 
 
   return ordered.length ? ordered.join(' ') : null;
 }
-
-// Set up SendGrid
-sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
 
 // Redis connection configuration
 const connection = {
@@ -145,7 +141,7 @@ const emailWorker = new Worker(
             'oauth_microsoft'
           );
         } catch (error) {
-          console.log('No Microsoft OAuth tokens found, will use SendGrid fallback...');
+          console.log('No Microsoft OAuth tokens found, will use Nodemailer fallback...');
         }
       }
 
@@ -168,8 +164,28 @@ const emailWorker = new Worker(
           effectiveThreadId
         );
       } else {
-        // Use SendGrid fallback
-        sendResult = await sendViaSendGrid(messageContext);
+        const mergedReferences = mergeReferences(
+          referencesFromPrev,
+          messageContext.gmailReferences,
+        );
+
+        const attachmentLinks = Array.isArray(attachments)
+          ? attachments
+              .map((att: any) => ({
+                filename: att?.filename || att?.name || 'attachment',
+                type: att?.type || att?.contentType || 'application/octet-stream',
+                size: Number(att?.size) || 0,
+                url: att?.url ?? null,
+              }))
+              .filter((att) => !!att.url)
+          : [];
+
+        const fallbackMessage = {
+          ...messageContext,
+          gmailReferences: mergedReferences ?? messageContext.gmailReferences,
+        };
+
+        sendResult = await sendViaNodemailerFallback(fallbackMessage, attachmentLinks, mergedReferences ?? undefined);
       }
 
       // Update message status only (do not persist threading metadata)
@@ -321,46 +337,6 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, threadId
 
   return {
     threadId: effectiveThreadId,
-    messageId: null,
-  };
-}
-
-async function sendViaSendGrid(message: any): Promise<{ threadId: string | null; messageId: string | null }> {
-  const cleanBody = cleanEmailBody(message.body);
-  const googleFonts = detectGoogleFonts(cleanBody);
-  const htmlContent = generateEmailHTML(cleanBody, googleFonts);
-
-  const emailData = {
-    to: Array.isArray(message.to) ? message.to : [message.to],
-    ...(message.cc && message.cc.length > 0 && { cc: message.cc }),
-    from: {
-      email: 'info@venturestrat.ai',
-      name: `${message.user.firstname} ${message.user.lastname}`,
-    },
-    replyTo: message.from,
-    subject: message.subject,
-    html: htmlContent,
-  };
-
-  const { referencesHeader, parentMessageId } = parseReferences(message.gmailReferences);
-  const headers: Record<string, string> = {};
-
-  if (parentMessageId) {
-    headers['In-Reply-To'] = parentMessageId;
-  }
-
-  if (referencesHeader) {
-    headers['References'] = referencesHeader;
-  }
-
-  if (Object.keys(headers).length > 0) {
-    (emailData as any).headers = headers;
-  }
-
-  await sgMail.send(emailData);
-
-  return {
-    threadId: message.threadId || null,
     messageId: null,
   };
 }
