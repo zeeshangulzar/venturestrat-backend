@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient, Prisma } from '@prisma/client';
-import nodemailer, { Transporter, SendMailOptions } from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import multer from 'multer';
 import { google } from "googleapis";
 import { clerkClient } from '@clerk/clerk-sdk-node';
@@ -20,26 +20,11 @@ const formatFileSize = (bytes: number): string => {
 const router = Router();
 const prisma = new PrismaClient();
 
-const gmailUser = process.env.GMAIL_USER;
-const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
-let sharedTransporter: Transporter | null = null;
-
-export function getNodemailerTransport(): Transporter {
-  if (!gmailUser || !gmailAppPassword) {
-    throw new Error('Email transport not configured. Please set GMAIL_USER and GMAIL_APP_PASSWORD.');
-  }
-
-  if (!sharedTransporter) {
-    sharedTransporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: gmailUser,
-        pass: gmailAppPassword,
-      },
-    });
-  }
-
-  return sharedTransporter;
+const sendgridApiKey = process.env.SENDGRID_API_KEY;
+if (!sendgridApiKey) {
+  console.warn('SENDGRID_API_KEY is not set; email fallback will fail.');
+} else {
+  sgMail.setApiKey(sendgridApiKey);
 }
 
 const previousMessageSelect = {
@@ -485,7 +470,7 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
   };
 }
 
-export async function sendViaNodemailerFallback(
+export async function sendViaSendgridFallback(
   message: any,
   attachmentLinks: AttachmentLink[] = [],
   mergedReferences?: string | null,
@@ -523,34 +508,28 @@ export async function sendViaNodemailerFallback(
       ? String(message.cc).split(',').map((email: string) => email.trim()).filter(Boolean)
       : [];
 
-  const transport = getNodemailerTransport();
-  const senderName = buildSenderDisplayName(message.user, gmailUser || message.from);
-  const fromAddress = gmailUser!;
+  const senderName = buildSenderDisplayName(message.user, message.from);
+  const fromAddress = process.env.SENDGRID_FROM_ADDRESS || message.from;
 
-  const mailOptions: SendMailOptions = {
-    to: toRecipients,
-    from: `"${senderName}" <${fromAddress}>`,
+  await sgMail.send({
+    from: {
+      name: senderName,
+      email: fromAddress,
+    },
     replyTo: message.from,
     subject: message.subject,
     html: htmlContent,
-  };
-
-  if (ccRecipients.length > 0) {
-    mailOptions.cc = ccRecipients;
-  }
-
-  const headers: Record<string, string> = {};
-  if (parentMessageId) {
-    headers['In-Reply-To'] = parentMessageId;
-  }
-  if (referencesHeader) {
-    headers['References'] = referencesHeader;
-  }
-  if (Object.keys(headers).length > 0) {
-    mailOptions.headers = headers;
-  }
-
-  await transport.sendMail(mailOptions);
+    personalizations: [
+      {
+        to: toRecipients.map((email: string) => ({ email })),
+        ...(ccRecipients.length > 0 ? { cc: ccRecipients.map((email: string) => ({ email })) } : {}),
+        headers: {
+          ...(parentMessageId ? { 'In-Reply-To': parentMessageId } : {}),
+          ...(referencesHeader ? { References: referencesHeader } : {}),
+        },
+      },
+    ],
+  });
 
   return {
     threadId: message.threadId || null,
@@ -1093,16 +1072,9 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
   console.log('Received send message request for messageId:', messageId);
 
   try {
-    try {
-      getNodemailerTransport();
-    } catch (transportError) {
-      const message = transportError instanceof Error ? transportError.message : 'Email transport not configured';
-      return res.status(500).json({ error: message });
+    if (!sendgridApiKey) {
+      return res.status(500).json({ error: 'SendGrid API key not configured' });
     }
-
-    console.log('Nodemailer Gmail transport configured:', {
-      user: gmailUser ? 'present' : 'missing',
-    });
 
     // Parse FormData/JSON attachments
     const emailAttachments = []; // For email sending (download links)
@@ -1322,8 +1294,8 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
         gmailReferences: mergedRefs ?? message.gmailReferences,
       };
 
-      providerResult = await sendViaNodemailerFallback(fallbackMessage, emailAttachments, mergedRefs);
-      console.log('Email sent via Nodemailer fallback');
+      providerResult = await sendViaSendgridFallback(fallbackMessage, emailAttachments, mergedRefs);
+      console.log('Email sent via SendGrid fallback');
     }
 
     // Update message with threading metadata and attachments
@@ -1617,8 +1589,8 @@ router.post('/message/:messageId/send-reply', upload.any(), async (req, res) => 
         gmailReferences: mergedRefs ?? message.gmailReferences,
       };
 
-      providerResult = await sendViaNodemailerFallback(fallbackMessage, emailAttachments, mergedRefs);
-      console.log('Email sent via Nodemailer fallback');
+      providerResult = await sendViaSendgridFallback(fallbackMessage, emailAttachments, mergedRefs);
+      console.log('Email sent via SendGrid fallback');
     }
 
     const updatedMessage = await prisma.message.update({

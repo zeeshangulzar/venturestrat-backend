@@ -2,7 +2,7 @@ import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
-import { cleanEmailBody, sendViaNodemailerFallback } from '../routes/message.js';
+import { cleanEmailBody, sendViaSendgridFallback } from '../routes/message.js';
 
 const prisma = new PrismaClient();
 
@@ -185,7 +185,11 @@ const emailWorker = new Worker(
           gmailReferences: mergedReferences ?? messageContext.gmailReferences,
         };
 
-        sendResult = await sendViaNodemailerFallback(fallbackMessage, attachmentLinks, mergedReferences ?? undefined);
+        sendResult = await sendViaSendgridFallback(
+          fallbackMessage,
+          attachmentLinks,
+          mergedReferences ?? undefined,
+        );
       }
 
       // Update message status only (do not persist threading metadata)
@@ -351,4 +355,3 @@ emailWorker.on('failed', (job, err) => {
 });
 
 export default emailWorker;
-
