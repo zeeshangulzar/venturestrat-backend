@@ -1,56 +1,14 @@
-import { load } from 'cheerio';
+// src/services/logoScraper.ts
+import 'dotenv/config';
+import { load, type CheerioAPI } from 'cheerio';
 import axios from 'axios';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { uploadPublicFile, getSignedUrlForAsset } from './storage.js';
 
 const FIRECRAWL_API_URL = 'https://api.firecrawl.dev/v1/scrape';
 const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
-
-// Shared selectors to mirror the Firecrawl test harness + inline SVG support
-const logoSelectors = [
-  // SVG-specific selectors (prioritized for inline SVGs)
-  { selector: 'a[class*="Logo"] svg', description: 'SVG inside elements with "Logo" in class' },
-  { selector: 'svg[class*="logo" i]', description: 'SVG with "logo" in class' },
-  { selector: 'svg[class*="Logo"]', description: 'SVG with "Logo" in class (case sensitive)' },
-  { selector: 'svg[aria-label*="logo"]', description: 'SVG with "logo" in aria-label' },
-  { selector: '.logo svg', description: 'SVG inside .logo container' },
-  { selector: '#logo svg', description: 'SVG inside #logo container' },
-  { selector: '.header svg', description: 'SVG inside .header container' },
-  { selector: '.navbar svg', description: 'SVG inside .navbar container' },
-  { selector: '.brand svg', description: 'SVG inside .brand container' },
-  { selector: 'svg[id*="logo" i]', description: 'SVG with "logo" in ID' },
-  
-  // Image selectors (prioritized - most specific first)
-  { selector: '.navbar-brand img', description: 'Images inside .navbar-brand (most common logo location)' },
-  { selector: 'img[alt*="logo" i]', description: 'Images with "logo" in alt text' },
-  { selector: 'img[class*="logo" i]', description: 'Images with "logo" in class' },
-  { selector: 'img[id*="logo" i]', description: 'Images with "logo" in ID' },
-  { selector: 'img[src*="Logo"]', description: 'Images with "Logo" in src (case sensitive)' },
-  { selector: '.logo img', description: 'Images inside .logo container' },
-  { selector: '#logo img', description: 'Images inside #logo container' },
-  { selector: '.header img', description: 'Images inside .header container' },
-  { selector: '.brand img', description: 'Images inside .brand container' },
-  { selector: '.navbar img', description: 'Images inside .navbar container' },
-  { selector: '.site-header img', description: 'Images inside .site-header container' },
-  { selector: '.main-header img', description: 'Images inside .main-header container' },
-  { selector: 'img[src*="logo"]', description: 'Images with "logo" in src' },
-  { selector: 'img[src*="brand"]', description: 'Images with "brand" in src' },
-  { selector: 'img[src*="header"]', description: 'Images with "header" in src' },
-  
-  // Meta and link tags
-  { selector: 'link[rel="icon"]', description: 'Favicon links' },
-  { selector: 'link[rel="shortcut icon"]', description: 'Shortcut icon links' },
-  { selector: 'link[rel="apple-touch-icon"]', description: 'Apple touch icon links' },
-  { selector: 'meta[property="og:image"]', description: 'Open Graph images' },
-  { selector: 'meta[name="twitter:image"]', description: 'Twitter images' },
-  
-  // Generic image selectors (lower priority)
-  { selector: 'img[src*="favicon"]', description: 'Images with "favicon" in src' },
-  { selector: 'img[src*="icon"]', description: 'Images with "icon" in src' },
-  { selector: 'img[src*="svg"]', description: 'SVG images (often logos)' },
-  { selector: 'img[src*="png"]', description: 'PNG images' },
-  { selector: 'img[src*="jpg"]', description: 'JPG images' },
-  { selector: 'img[src*="jpeg"]', description: 'JPEG images' }
-];
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 export interface LogoScrapingResult {
   success: boolean;
@@ -58,19 +16,56 @@ export interface LogoScrapingResult {
   error?: string;
 }
 
+type AiLogoSelection = {
+  url: string;
+  reason?: string;
+};
+
+type LogoCandidate = {
+  url: string;
+  source: string;
+};
+
+type RichLogoCandidate = {
+  id: string;
+  url: string; // absolute or data:
+  kind: 'img' | 'svg' | 'bg' | 'icon';
+  alt?: string;
+  classList?: string[];
+  idAttr?: string;
+  filename?: string;
+  inHeaderOrNav?: boolean;
+  insideHomeLink?: boolean;
+  widthAttr?: number;
+  heightAttr?: number;
+  containsWordLogo?: boolean;
+  containsBrandHint?: boolean;
+  thirdPartyPenalty?: number; // 0..1
+  score?: number;
+  snippet?: string; // short preview for inline svg
+};
+
+const AUTO_PICK_THRESHOLD = 55;
+const SMALL_ICON_CUTOFF = 64; // px
+
+const WORDS_LOGO = /(^|[-_/])logo([-._/]|$)/i;
+const HEADERISH = /(header|masthead|topbar|navbar|site\-header|branding)/i;
+const BRANDISH = /(brand|branding|site\-brand|navbar\-brand)/i;
+
+// ======= PUBLIC ENTRYPOINT =======
 export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapingResult> {
   try {
     // Ensure URL has protocol
     const url = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
     const baseUrl = new URL(url).origin;
-    
+
     // Extract domain name for matching (e.g., "boxgroup" from "boxgroup.com")
     const domainName = new URL(url).hostname.replace('www.', '').split('.')[0].toLowerCase();
 
     if (!FIRECRAWL_API_KEY) {
       return {
         success: false,
-        error: 'Firecrawl API key is not configured'
+        error: 'Firecrawl API key is not configured',
       };
     }
 
@@ -81,232 +76,550 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
         formats: ['html', 'markdown'],
         onlyMainContent: false,
         waitFor: 2000,
-        timeout: 30000
+        timeout: 30000,
       },
       {
         headers: {
           Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        timeout: 35000
+        timeout: 35000,
       }
     );
 
-    const html =
-      firecrawlResponse.data?.data?.html ||
-      firecrawlResponse.data?.html;
-
+    const html = firecrawlResponse.data?.data?.html || firecrawlResponse.data?.html;
     if (!html) {
-      return {
-        success: false,
-        error: 'Firecrawl response did not include HTML content'
-      };
+      return { success: false, error: 'Firecrawl response did not include HTML content' };
     }
 
     const $ = load(html);
 
-    let logoUrl: string | null = null;
-    let foundSelector: string | null = null;
-    let allFoundImages: Array<{
-      url: string;
-      selector: string;
-      element: string;
-      alt: string;
-      class: string;
-    }> = [];
+    // Build & score candidates
+    const candidates = extractLogoCandidates($, baseUrl, domainName)
+      .map((c) => ({ ...c, score: scoreCandidate(c) }))
+      .sort((a, b) => (b.score! - a.score!));
 
-    // Enhanced logo detection logic with inline SVG support
-    for (const { selector } of logoSelectors) {
-      const elements = $(selector);
-      
-      if (elements.length > 0) {
-        elements.each((index, element) => {
-          const $element = $(element);
-          let src: string | null = null;
-          let elementType = $element.prop('tagName')?.toLowerCase() || '';
-          let isInlineSvg = false;
-          
-          if (elementType === 'img') {
-            src = $element.attr('src') || $element.attr('data-src') || $element.attr('data-lazy-src') || null;
-          } else if (elementType === 'link') {
-            src = $element.attr('href') || null;
-          } else if (elementType === 'meta') {
-            src = $element.attr('content') || null;
-          } else if (elementType === 'svg') {
-            // For SVG elements, check if it has a src attribute first
-            src = $element.attr('src') || $element.attr('data-src') || null;
-            
-            if (!src) {
-              // Handle inline SVG - convert to data URL
-              const svgHtml = $.html($element);
-              if (svgHtml && svgHtml.length > 0 && svgHtml.length < 100000) { // Reasonable size limit
-                // Create a data URL from the inline SVG
-                src = `data:image/svg+xml;base64,${Buffer.from(svgHtml).toString('base64')}`;
-                isInlineSvg = true;
-              } else {
-                return; // SVG too large or empty, skip it
-              }
-            }
-          }
-          
-          if (src) {
-            // Convert relative URLs to absolute (skip for data URLs and inline SVGs)
-            let absoluteUrl = src;
-            
-            if (src.startsWith('data:')) {
-              // For inline SVGs and data URLs, use as-is
-              absoluteUrl = src;
-            } else if (src.startsWith('//')) {
-              absoluteUrl = `https:${src}`;
-            } else if (src.startsWith('/')) {
-              absoluteUrl = new URL(src, baseUrl).href;
-            } else if (src.startsWith('http')) {
-              absoluteUrl = src;
-            } else {
-              absoluteUrl = new URL(src, baseUrl).href;
-            }
-            
-            const imageData = {
-              url: absoluteUrl,
-              selector: selector,
-              element: isInlineSvg ? 'inline-svg' : elementType,
-              alt: $element.attr('alt') || $element.attr('aria-label') || $element.find('title').text() || '',
-              class: $element.attr('class') || ''
-            };
-            
-            allFoundImages.push(imageData);
-            
-            // Check if this is a third-party logo and log it
-            if (isThirdPartyLogo(absoluteUrl, domainName)) {
-              console.log(`⏭️  Skipping third-party logo: ${absoluteUrl.substring(0, 80)}...`);
-            }
-            
-            // Don't select logos early - let the scoring system decide!
-            // This ensures we compare ALL logos and pick the best one
-          }
-        });
-      }
-    }
+    // Legacy fallback (first plausible image/svg in DOM order)
+    const legacyFallback = findFallbackLogoCandidate($, baseUrl, domainName);
 
-    // If no logo found with selectors, try to find the best candidate
-    if (!logoUrl && allFoundImages.length > 0) {
-      // Sort by likelihood of being a logo
-      const sortedImages = allFoundImages.sort((a, b) => {
-        const scoreA = getLogoScore(a, domainName);
-        const scoreB = getLogoScore(b, domainName);
-        return scoreB - scoreA;
-      });
-      
-      if (sortedImages.length > 0) {
-        logoUrl = sortedImages[0].url;
-        foundSelector = sortedImages[0].selector;
-      }
-    }
+    // Choose primary candidate: (1) auto-pick high score; else (2) ask OpenAI; else (3) fallback
+    let primaryCandidate: LogoCandidate | null = null;
 
-    if (!logoUrl) {
-      return {
-        success: false,
-        error: 'No logo found with any selector'
-      };
-    }
-
-    // Handle logo download (or data URL extraction)
-    let logoBuffer: Buffer;
-    let contentType: string;
-
-    if (logoUrl.startsWith('data:')) {
-      // Handle data URL (inline SVG)
-      const matches = logoUrl.match(/^data:([^;]+);base64,(.+)$/);
-      if (!matches) {
-        return {
-          success: false,
-          error: 'Invalid data URL format'
-        };
-      }
-      
-      contentType = matches[1];
-      logoBuffer = Buffer.from(matches[2], 'base64');
-      
-      console.log('📦 Extracted inline SVG');
+    if (candidates[0] && (candidates[0].score ?? 0) >= AUTO_PICK_THRESHOLD) {
+      primaryCandidate = { url: candidates[0].url, source: 'heuristic' };
     } else {
-      // Download the logo from URL
-      const logoResponse = await fetch(logoUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-      });
-
-      if (!logoResponse.ok) {
-        return {
-          success: false,
-          error: `Failed to download logo: ${logoResponse.status} ${logoResponse.statusText}`
-        };
+      const aiPick = await pickFromCandidatesWithOpenAI(candidates, baseUrl, domainName);
+      if (aiPick?.url) {
+        primaryCandidate = { url: aiPick.url, source: aiPick.reason || 'openai' };
       }
+    }
 
-      // Get logo data
-      logoBuffer = Buffer.from(await logoResponse.arrayBuffer());
-      contentType = logoResponse.headers.get('content-type') || 'image/png';
+    if (!primaryCandidate && legacyFallback) {
+      primaryCandidate = legacyFallback;
     }
-    
-    // Validate it's actually an image
-    if (!contentType.startsWith('image/')) {
-      return {
-        success: false,
-        error: 'Logo URL does not point to an image file'
-      };
+
+    if (!primaryCandidate) {
+      return { success: false, error: 'No logo candidates found' };
     }
-    
-    // Warn if logo is suspiciously large (likely a hero/banner image)
+
+    // Secondary (fallback) candidate if different
+    const secondaryCandidate =
+      legacyFallback && legacyFallback.url !== primaryCandidate.url ? legacyFallback : null;
+
+    // Download + validate
+    const primaryDownload = await downloadLogoCandidate(primaryCandidate);
+    let downloadResult = await validateDownloadedLogo(primaryDownload);
+    let finalCandidate = primaryCandidate;
+
+    if (!downloadResult.success && secondaryCandidate) {
+      const fallbackDownload = await downloadLogoCandidate(secondaryCandidate);
+      const validatedFallback = await validateDownloadedLogo(fallbackDownload);
+      if (validatedFallback.success) {
+        downloadResult = validatedFallback;
+        finalCandidate = secondaryCandidate;
+      }
+    }
+
+    if (!downloadResult.success) {
+      return { success: false, error: downloadResult.error };
+    }
+
+    const { buffer: logoBuffer, contentType, url: finalLogoUrl, isInlineSvg } = downloadResult;
+
+    // Warn if suspiciously large (hero/banner)
     const logoSizeMB = logoBuffer.length / (1024 * 1024);
     if (logoSizeMB > 1) {
-      console.log(`⚠️  Warning: Logo is very large (${logoSizeMB.toFixed(2)} MB) - might be a hero image, not a logo`);
+      console.log(
+        `⚠️  Warning: Logo is very large (${logoSizeMB.toFixed(2)} MB) - might be a hero image, not a logo`
+      );
     }
 
-    // Generate filename
+    // Generate filename (for future cloud upload)
     const timestamp = Date.now();
-    const extension = contentType.split('/')[1] || 'png';
+    const extension = (contentType.split('/')[1] || 'png').replace('+xml', '');
     const filename = `logo-${timestamp}.${extension}`;
     const fileKey = `logos/${filename}`;
 
     // ===== CLOUD UPLOAD (COMMENTED OUT FOR LOCAL TESTING) =====
     await uploadPublicFile(logoBuffer, fileKey, contentType);
-    const finalLogoUrl = await getSignedUrlForAsset(fileKey);
+    const finalLogoUrlSigned = await getSignedUrlForAsset(fileKey);
     // ===== END CLOUD UPLOAD =====
 
-    // For local testing, return the original logo URL
-    // const finalLogoUrl = logoUrl;
-    const isInlineSvg = logoUrl.startsWith('data:');
-
-    // Log details for local testing
     console.log('✅ Logo found successfully!');
-    console.log('📍 Found using selector:', foundSelector);
-    
+    console.log('📍 Source:', finalCandidate.source);
     if (isInlineSvg) {
       console.log('🎨 Type: Inline SVG (embedded in HTML)');
-      console.log('🔗 Data URL:', logoUrl.substring(0, 100) + '... (truncated)');
+      console.log('🔗 Data URL:', finalLogoUrl.substring(0, 100) + '... (truncated)');
     } else {
-      console.log('🔗 Original URL:', logoUrl);
+      console.log('🔗 Original URL:', finalLogoUrl);
     }
-    
     console.log('📦 Content Type:', contentType);
-    console.log('📏 Logo Size:', `${logoBuffer.length} bytes (${(logoBuffer.length / 1024).toFixed(2)} KB)`);
+    console.log(
+      '📏 Logo Size:',
+      `${logoBuffer.length} bytes (${(logoBuffer.length / 1024).toFixed(2)} KB)`
+    );
     console.log('💾 Would save as:', fileKey);
 
     return {
       success: true,
-      logoUrl: finalLogoUrl
+      logoUrl: finalLogoUrl, // or finalLogoUrlSigned if uploading
     };
-
   } catch (error) {
     console.error('Error scraping logo:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
     };
   }
 }
 
-// List of third-party domains to exclude (not company logos)
+// ======= AI PICKER (CANDIDATE LIST, NOT RAW HTML) =======
+async function pickFromCandidatesWithOpenAI(
+  candidates: RichLogoCandidate[],
+  baseUrl: string,
+  domainName?: string
+): Promise<AiLogoSelection | null> {
+  if (!OPENAI_API_KEY || candidates.length === 0) return null;
+
+  const topK = candidates.slice(0, 8).map((c) => ({
+    id: c.id,
+    url: c.url,
+    kind: c.kind,
+    alt: c.alt,
+    classList: c.classList,
+    idAttr: c.idAttr,
+    filename: c.filename,
+    inHeaderOrNav: !!c.inHeaderOrNav,
+    insideHomeLink: !!c.insideHomeLink,
+    widthAttr: c.widthAttr,
+    heightAttr: c.heightAttr,
+    containsWordLogo: !!c.containsWordLogo,
+    containsBrandHint: !!c.containsBrandHint,
+    snippet: c.snippet,
+    score: c.score,
+  }));
+
+  const payload = {
+    model: 'gpt-4o-mini',
+    temperature: 0,
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'logo_choice_v2',
+        schema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'ID of the chosen candidate' },
+            url: { type: 'string', description: 'Absolute URL (or data URI) of chosen candidate' },
+            reason: { type: 'string' },
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+            noLogo: { type: 'boolean', description: 'True if none is a suitable brand logo' },
+          },
+          required: ['id', 'url', 'reason', 'confidence'],
+          additionalProperties: false,
+        },
+      },
+    },
+    messages: [
+      {
+        role: 'system',
+        content: `You are a brand-logo selector. You receive a small list of image candidates from a website and must pick the company's PRIMARY brand logo.
+
+Rules (very important):
+- Prefer SVG over raster when both are plausible.
+- Prefer candidates in the header/navigation, especially inside a link to '/'.
+- Prefer elements with class/id/filename containing 'logo'.
+- Prefer images whose alt/filename includes the brand (${domainName ?? 'brand'}).
+- Exclude favicons/small icons (≤64px), social/payment/partner badges, and hero/banner images.
+- If multiple variants (dark/light/mark-only), prefer the full horizontal wordmark that best represents the brand.
+- Only choose from the provided candidates. If none is appropriate, set "noLogo": true and explain briefly.`,
+      },
+      {
+        role: 'user',
+        content: `Origin: ${baseUrl}
+Brand hint: ${domainName ?? 'unknown'}
+
+Candidates (ranked by heuristic):
+${JSON.stringify(topK, null, 2)}
+
+Return STRICT JSON matching the schema.`,
+      },
+    ],
+  };
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.warn('OpenAI selection failed:', text);
+      return null;
+    }
+
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) return null;
+
+    const parsed =
+      typeof content === 'string' ? JSON.parse(content) : JSON.parse(JSON.stringify(content));
+
+    const resolvedUrl = resolveToAbsoluteUrl(String(parsed.url).trim(), baseUrl) || String(parsed.url).trim();
+    if (!resolvedUrl) return null;
+
+    return { url: resolvedUrl, reason: parsed.reason || 'openai' };
+  } catch (e) {
+    console.warn('OpenAI logo picker failed:', e);
+    return null;
+  }
+}
+
+// ======= CANDIDATE EXTRACTION + SCORING =======
+function extractLogoCandidates($: CheerioAPI, baseUrl: string, domainName?: string): RichLogoCandidate[] {
+  const list: RichLogoCandidate[] = [];
+
+  // helper
+  const abs = (u: string) => resolveToAbsoluteUrl(u, baseUrl);
+
+  // 1) <img> & <svg>
+  $('img, svg').each((i, el) => {
+    const $el = $(el);
+    const tag = el.tagName?.toLowerCase() || '';
+    let url = '';
+
+    if (tag === 'svg') {
+      const svgHtml = $.html($el);
+      if (svgHtml && svgHtml.length > 0 && svgHtml.length < 100_000) {
+        url = `data:image/svg+xml;base64,${Buffer.from(svgHtml).toString('base64')}`;
+      }
+    } else {
+      url = $el.attr('src') || $el.attr('data-src') || $el.attr('data-lazy-src') || '';
+      url = abs(url) || '';
+    }
+    if (!url) return;
+
+    // DOM context
+    const parents = $el
+      .parents()
+      .toArray()
+      .map((p) => {
+        const c = ($(p).attr('class') || '') + ' ' + ($(p).attr('id') || '');
+        return c;
+      })
+      .join(' ');
+    const inHeaderOrNav = HEADERISH.test(parents) || /(^|\s)(nav|site\-nav)(\s|$)/i.test(parents);
+    const classList = ($el.attr('class') || '').split(/\s+/).filter(Boolean);
+    const idAttr = $el.attr('id') || undefined;
+
+    // home link?
+    const parentLink = $el.closest('a');
+    const href = parentLink.attr('href') || '';
+    const insideHomeLink = href === '/' || href === baseUrl || href === baseUrl + '/';
+
+    // basic attributes
+    const alt = $el.attr('alt') || undefined;
+    const widthAttr = Number($el.attr('width') || NaN);
+    const heightAttr = Number($el.attr('height') || NaN);
+
+    // filename
+    let filename = '';
+    try {
+      filename = new URL(url.startsWith('data:') ? 'about:blank' : url).pathname.split('/').pop() || '';
+    } catch {
+      // ignore
+    }
+
+    // text hints
+    const containsWordLogo =
+      WORDS_LOGO.test(filename) ||
+      classList.some((c) => WORDS_LOGO.test(c)) ||
+      (idAttr ? WORDS_LOGO.test(idAttr) : false);
+    const brandNeedle = (domainName || '').replace(/^www\./, '').split('.')[0];
+    const containsBrandHint =
+      !!brandNeedle &&
+      ((alt || '').toLowerCase().includes(brandNeedle) || filename.toLowerCase().includes(brandNeedle));
+
+    list.push({
+      id: `cand_${list.length + 1}`,
+      url,
+      kind: tag === 'svg' ? 'svg' : 'img',
+      alt,
+      classList,
+      idAttr,
+      filename,
+      inHeaderOrNav,
+      insideHomeLink,
+      widthAttr: Number.isFinite(widthAttr) ? widthAttr : undefined,
+      heightAttr: Number.isFinite(heightAttr) ? heightAttr : undefined,
+      containsWordLogo,
+      containsBrandHint,
+      thirdPartyPenalty: isThirdPartyPenalty(url, domainName),
+      snippet:
+        tag === 'svg'
+          ? Buffer.from(url.split(',')[1] || '', 'base64').toString('utf8').slice(0, 200)
+          : undefined,
+    });
+  });
+
+  // 2) inline background-image
+  $('[style*="background-image"]').each((i, el) => {
+    const $el = $(el);
+    const style = $el.attr('style') || '';
+    const m = style.match(/background-image:\s*url\((['"]?)(.*?)\1\)/i);
+    const raw = m?.[2];
+    if (!raw) return;
+    const url = abs(raw);
+    if (!url) return;
+
+    const parents = $el
+      .parents()
+      .toArray()
+      .map((p) => {
+        const c = ($(p).attr('class') || '') + ' ' + ($(p).attr('id') || '');
+        return c;
+      })
+      .join(' ');
+    const inHeaderOrNav = HEADERISH.test(parents) || BRANDISH.test(parents);
+
+    list.push({
+      id: `cand_${list.length + 1}`,
+      url,
+      kind: 'bg',
+      inHeaderOrNav,
+      containsWordLogo: WORDS_LOGO.test(url),
+      containsBrandHint: !!domainName && url.toLowerCase().includes(domainName),
+      thirdPartyPenalty: isThirdPartyPenalty(url, domainName),
+    });
+  });
+
+  // 3) favicons/icons (low priority)
+  $('link[rel*="icon"]').each((i, el) => {
+    const href = $(el).attr('href') || '';
+    const url = abs(href);
+    if (!url) return;
+
+    list.push({
+      id: `cand_${list.length + 1}`,
+      url,
+      kind: 'icon',
+      containsWordLogo: WORDS_LOGO.test(url),
+      containsBrandHint: !!domainName && url.toLowerCase().includes(domainName),
+      thirdPartyPenalty: isThirdPartyPenalty(url, domainName),
+    });
+  });
+
+  return list;
+}
+
+function isThirdPartyPenalty(url: string, domainName?: string): number {
+  try {
+    const u = new URL(url.startsWith('data:') ? 'https://local.invalid' : url);
+    const host = u.hostname.toLowerCase();
+
+    // Allow common first-party CDNs with low penalty
+    const softAllowed = [
+      'cloudfront.net',
+      'cdn.shopify.com',
+      'shopifycdn.com',
+      'wixstatic.com',
+      'squarespace-cdn.com',
+      'wpenginepowered.com',
+      'kinstacdn.com',
+      'vercel-storage.com',
+    ];
+    if (softAllowed.some((d) => host === d || host.endsWith(`.${d}`))) return 0.15;
+
+    if (!domainName) return 0.35;
+    if (host.includes(domainName)) return 0.0;
+
+    return 0.5; // soft penalty (not a hard exclude)
+  } catch {
+    return 0.35;
+  }
+}
+
+function scoreCandidate(c: RichLogoCandidate): number {
+  let s = 0;
+
+  // positives
+  if (c.kind === 'svg') s += 30;
+  if (c.inHeaderOrNav) s += 30;
+  if (c.insideHomeLink) s += 25;
+  if (c.containsWordLogo) s += 25;
+  if (c.containsBrandHint) s += 15;
+
+  // tiny favicons
+  if ((c.widthAttr && c.widthAttr <= SMALL_ICON_CUTOFF) || (c.heightAttr && c.heightAttr <= SMALL_ICON_CUTOFF)) s -= 20;
+
+  // hero-ish
+  if ((c.widthAttr && c.widthAttr >= 600) || (c.heightAttr && c.heightAttr >= 600)) s -= 10;
+
+  // filename heuristics
+  if (c.filename) {
+    const f = c.filename.toLowerCase();
+    if (/sprite|banner|hero|header|cover/.test(f)) s -= 30;
+    if (/favicon/.test(f)) s -= 35;
+  }
+
+  // third-party penalty
+  s -= (c.thirdPartyPenalty || 0) * 30;
+
+  return s;
+}
+
+// ======= RESOLUTION + LEGACY FALLBACK =======
+function resolveToAbsoluteUrl(url: string, baseUrl: string): string | null {
+  if (!url) return null;
+  if (url.startsWith('data:')) return url;
+  if (url.startsWith('//')) return `https:${url}`;
+  if (url.startsWith('http')) return url;
+  try {
+    return new URL(url, baseUrl).href;
+  } catch {
+    return null;
+  }
+}
+
+function findFallbackLogoCandidate($: CheerioAPI, baseUrl: string, domainName?: string): LogoCandidate | null {
+  const elements = $('img, svg');
+
+  for (const element of elements.toArray()) {
+    const $element = $(element);
+    const tagName = element.tagName?.toLowerCase() || '';
+
+    if (tagName === 'svg' && !$element.attr('src')) {
+      const svgHtml = $.html($element);
+      if (svgHtml && svgHtml.length > 0 && svgHtml.length < 100000) {
+        return {
+          url: `data:image/svg+xml;base64,${Buffer.from(svgHtml).toString('base64')}`,
+          source: 'inline-svg fallback',
+        };
+      }
+      continue;
+    }
+
+    const rawSrc =
+      $element.attr('src') || $element.attr('data-src') || $element.attr('data-lazy-src') || '';
+
+    if (!rawSrc) continue;
+
+    const absoluteUrl = resolveToAbsoluteUrl(rawSrc, baseUrl);
+    if (!absoluteUrl) continue;
+
+    if (!absoluteUrl.startsWith('data:') && isThirdPartyLogo(absoluteUrl, domainName)) {
+      continue;
+    }
+
+    return {
+      url: absoluteUrl,
+      source: `${tagName || 'img'} (fallback)`,
+    };
+  }
+
+  return null;
+}
+
+// ======= DOWNLOAD + VALIDATION =======
+type DownloadResult =
+  | {
+      success: true;
+      buffer: Buffer;
+      contentType: string;
+      url: string;
+      isInlineSvg: boolean;
+    }
+  | { success: false; error: string };
+
+async function downloadLogoCandidate(candidate: LogoCandidate): Promise<DownloadResult> {
+  const { url } = candidate;
+
+  if (url.startsWith('data:')) {
+    const matches = url.match(/^data:([^;]+);base64,(.+)$/);
+    if (!matches) {
+      return { success: false, error: 'Invalid inline logo data URL' };
+    }
+    return {
+      success: true,
+      buffer: Buffer.from(matches[2], 'base64'),
+      contentType: matches[1],
+      url,
+      isInlineSvg: true,
+    };
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `Failed to download logo: ${response.status} ${response.statusText}` };
+    }
+
+    // best effort: trust header, otherwise default
+    const contentType = response.headers.get('content-type') || 'image/png';
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    return {
+      success: true,
+      buffer,
+      contentType,
+      url,
+      isInlineSvg: false,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? `Failed to download logo: ${error.message}` : 'Failed to download logo',
+    };
+  }
+}
+
+async function validateDownloadedLogo(result: DownloadResult): Promise<DownloadResult> {
+  if (!result.success) return result;
+
+  const { buffer, contentType } = result;
+
+  // Must be image/*
+  if (!contentType.startsWith('image/')) {
+    return { success: false, error: 'Logo URL does not point to an image file' };
+  }
+
+  // Reject GIFs (often badges/spinners)
+  if (contentType.includes('gif')) {
+    return { success: false, error: 'GIF unlikely to be a primary logo' };
+  }
+
+  return result;
+}
+
+// ======= THIRD-PARTY FILTERS (LEGACY) =======
 const THIRD_PARTY_DOMAINS = [
   'cookieyes.com',
   'cookie-cdn.com',
@@ -324,13 +637,12 @@ const THIRD_PARTY_DOMAINS = [
   'cloudflare.com',
   'jsdelivr.net',
   'cdnjs.cloudflare.com',
-  'unpkg.com'
+  'unpkg.com',
 ];
 
 const THIRD_PARTY_PATH_PATTERNS: RegExp[] = [
   /\/badges?\b/,
   /\bbadge[-_]/,
-  // Only exclude /icons/ folders if they contain social media icons
   /\/icons?\/(whatsapp|facebook|twitter|instagram|linkedin|youtube|social|share|contact)/i,
   /\bicon[-_]?(whatsapp|facebook|twitter|instagram|linkedin|youtube|social|share)/i,
   /\bsocial[-_/]/,
@@ -339,10 +651,8 @@ const THIRD_PARTY_PATH_PATTERNS: RegExp[] = [
   /(?:\?|&)share=/,
   /(?:\?|&)social=/,
   /powered[-_]?by/,
-  // Social media icons (explicit patterns)
   /\/whatsapp/i,
   /whatsapp[-_]/i,
-  /facebook[-_]/i,
   /\/facebook/i,
   /twitter[-_]/i,
   /\/twitter/i,
@@ -353,10 +663,9 @@ const THIRD_PARTY_PATH_PATTERNS: RegExp[] = [
   /youtube[-_]/i,
   /\/youtube/i,
   /\/social[-_]media/i,
-  /\/contact[-_]icons/i
+  /\/contact[-_]icons/i,
 ];
 
-// Helper function to check if URL is from a third-party (not the company logo)
 function isThirdPartyLogo(url: string, domainName?: string): boolean {
   const urlLower = url.toLowerCase();
 
@@ -364,215 +673,69 @@ function isThirdPartyLogo(url: string, domainName?: string): boolean {
     const normalizedDomain = domainName.toLowerCase();
     const normalizedDomainClean = normalizedDomain.replace(/[^a-z0-9]/g, '');
     const urlClean = urlLower.replace(/[^a-z0-9]/g, '');
-
     if (urlLower.includes(normalizedDomain) || urlClean.includes(normalizedDomainClean)) {
       return false;
     }
   }
 
   let hostname = '';
-  let path = '';
+  let pathStr = '';
 
   try {
     const parsed = new URL(url);
     hostname = parsed.hostname.toLowerCase();
-    path = `${parsed.pathname}${parsed.search}${parsed.hash}`.toLowerCase();
+    pathStr = `${parsed.pathname}${parsed.search}${parsed.hash}`.toLowerCase();
   } catch {
     hostname = '';
-    path = urlLower;
+    pathStr = urlLower;
   }
 
   for (const domain of THIRD_PARTY_DOMAINS) {
-    if (hostname === domain || hostname.endsWith(`.${domain}`)) {
-      return true;
-    }
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) return true;
   }
 
-  const pathHaystack = `${hostname}${path}`;
+  const haystack = `${hostname}${pathStr}`;
   for (const pattern of THIRD_PARTY_PATH_PATTERNS) {
-    if (pattern.test(pathHaystack)) {
-      return true;
-    }
+    if (pattern.test(haystack)) return true;
   }
 
   return false;
 }
 
-// Helper function to determine if an image is likely a logo (from batch test)
-function isLikelyLogo(url: string, alt?: string, className?: string, domainName?: string): boolean {
-  const urlLower = url.toLowerCase();
-  const altLower = (alt || '').toLowerCase();
-  const classLower = (className || '').toLowerCase();
-  
-  // Exclude third-party logos first
-  if (isThirdPartyLogo(url, domainName)) {
+// ======= CLI =======
+const isCliExecution = (() => {
+  if (typeof process === 'undefined' || !process.argv?.[1]) return false;
+  try {
+    const invokedPath = path.resolve(process.argv[1]);
+    const currentFile = fileURLToPath(import.meta.url);
+    return invokedPath === currentFile;
+  } catch {
     return false;
   }
-  
-  // Check for logo keywords
-  const logoKeywords = ['logo', 'brand', 'header', 'navbar', 'site-title'];
-  
-  for (const keyword of logoKeywords) {
-    if (urlLower.includes(keyword) || altLower.includes(keyword) || classLower.includes(keyword)) {
-      return true;
-    }
-  }
-  
-  // Check if it's in a likely logo container
-  if (classLower.includes('logo') || classLower.includes('brand') || classLower.includes('header')) {
-    return true;
-  }
-  
-  return false;
-}
+})();
 
-// Helper function to score how likely an image is to be a logo (from batch test)
-function getLogoScore(image: { url: string; alt: string; class: string; selector: string }, domainName?: string): number {
-  let score = 0;
-  const urlLower = image.url.toLowerCase();
-  const altLower = image.alt.toLowerCase();
-  const classLower = image.class.toLowerCase();
-  const selectorLower = image.selector.toLowerCase();
-  
-  // HEAVILY penalize third-party logos
-  if (isThirdPartyLogo(image.url, domainName)) {
-    return -1000; // Basically exclude these
+if (isCliExecution) {
+  const targetUrl = process.argv[2];
+
+  if (!targetUrl) {
+    console.error('Usage: npx tsx src/services/logoScraper.ts <websiteUrl>');
+    process.exit(1);
   }
-  
-  // MASSIVE boost if URL contains the domain name (e.g., "box-group_logo.svg" for boxgroup.com)
-  if (domainName) {
-    // Remove hyphens and underscores for matching
-    const cleanDomain = domainName.replace(/[-_]/g, '');
-    const cleanUrl = urlLower.replace(/[-_]/g, '');
-    
-    if (cleanUrl.includes(cleanDomain)) {
-      score += 100; // HUGE boost for domain name match
-    }
-    
-    // Also check for variations (boxgroup vs box-group vs box_group)
-    if (urlLower.includes(domainName) || 
-        urlLower.includes(domainName.replace(/-/g, '_')) ||
-        urlLower.includes(domainName.replace(/_/g, '-'))) {
-      score += 100;
-    }
-  }
-  
-  // MASSIVE boost for navbar-brand (most common logo location)
-  if (selectorLower.includes('navbar-brand')) {
-    score += 150; // HUGE boost - this is almost always the company logo
-  }
-  
-  // HEAVILY BOOST logos in header/navbar (most likely to be company logo)
-  if (selectorLower.includes('header') || 
-      selectorLower.includes('navbar') || 
-      selectorLower.includes('nav ')) {
-    score += 50; // Big boost for header/navbar logos
-  }
-  
-  // HUGE boost for SVGs with aria-label containing "logo"
-  if (selectorLower.includes('aria-label') && altLower.includes('logo')) {
-    score += 80; // Aria-labels are very specific and intentional
-  }
-  
-  // Boost for logo-specific selectors
-  if (selectorLower.includes('.logo') || selectorLower.includes('#logo')) {
-    score += 30;
-  }
-  
-  // MASSIVE boost if alt text explicitly says "logo"
-  if (altLower.includes('logo')) {
-    score += 50; // Very high boost for explicit logo alt text
-  }
-  
-  // URL-based scoring
-  if (urlLower.includes('logo')) score += 10;
-  if (urlLower.includes('brand')) score += 8;
-  if (urlLower.includes('header')) score += 6;
-  if (urlLower.includes('favicon')) score += 4;
-  // Only give small boost for "icon" if it's not in a social icons folder
-  if (urlLower.includes('icon') && !urlLower.includes('/icons/') && !urlLower.match(/icon[s]?[-_](whatsapp|facebook|twitter|instagram|linkedin|youtube)/i)) {
-    score += 3;
-  }
-  
-  // Alt text scoring (already boosted above, but keep this for consistency)
-  if (altLower.includes('logo')) score += 10;
-  if (altLower.includes('brand')) score += 8;
-  if (altLower.includes('header')) score += 6;
-  
-  // Class scoring
-  if (classLower.includes('logo')) score += 10;
-  if (classLower.includes('brand')) score += 8;
-  if (classLower.includes('header')) score += 6;
-  if (classLower.includes('navbar') || classLower.includes('nav-')) score += 8;
-  
-  // HEAVILY penalize social/share icons in URLs
-  if (urlLower.includes('whatsapp') || 
-      urlLower.includes('facebook') || 
-      urlLower.includes('twitter') || 
-      urlLower.includes('instagram') || 
-      urlLower.includes('linkedin') || 
-      urlLower.includes('youtube') ||
-      urlLower.includes('/icons/whatsapp') ||
-      urlLower.includes('/icons/facebook') ||
-      urlLower.includes('/icons/twitter') ||
-      urlLower.includes('/icons/instagram') ||
-      urlLower.includes('/icons/linkedin') ||
-      urlLower.includes('/icons/youtube')) {
-    score -= 200; // HEAVY penalty for social media icons
-  }
-  
-  // Penalize social/share icons in alt/class
-  if (altLower.includes('social') || altLower.includes('share') || altLower.includes('follow') ||
-      altLower.includes('whatsapp') || altLower.includes('facebook') || altLower.includes('twitter')) {
-    score -= 50;
-  }
-  
-  // Penalize portfolio company logos (common pattern)
-  if (altLower.includes('portfolio') || 
-      altLower.includes('client') || 
-      altLower.includes('partner') ||
-      classLower.includes('portfolio') ||
-      classLower.includes('client')) {
-    score -= 100;
-  }
-  
-  // Penalize if URL contains a different company name (portfolio company logos)
-  // Common patterns: company_name.png, companyname.svg, etc.
-  if (domainName) {
-    const urlFileName = urlLower.split('/').pop() || '';
-    const cleanFileName = urlFileName.replace(/\.(png|jpg|jpeg|svg|webp|gif).*$/, '');
-    const cleanDomain = domainName.replace(/[-_]/g, '');
-    const cleanFileNameNormalized = cleanFileName.replace(/[-_]/g, '');
-    
-    // If filename has underscores/hyphens and doesn't match domain, likely a portfolio company
-    if ((cleanFileName.includes('_') || cleanFileName.includes('-')) && 
-        !cleanFileNameNormalized.includes(cleanDomain) &&
-        cleanFileName.length > 5) { // Avoid penalizing short filenames
-      score -= 80; // Likely a portfolio company logo
-    }
-  }
-  
-  // File type scoring
-  if (urlLower.includes('.svg')) score += 5; // SVGs are often logos
-  if (urlLower.includes('.png')) score += 3;
-  if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) score += 2;
-  
-  // Penalize very large image dimensions (likely hero images, not logos)
-  if (urlLower.includes('w_1905') || // Wix large images
-      urlLower.includes('w_2000') ||
-      urlLower.includes('w_3000') ||
-      urlLower.includes('1920x') ||
-      urlLower.includes('2000x')) {
-    score -= 200; // Heavy penalty for huge images
-  }
-  
-  // Check for large Wix images (w_XXXX pattern)
-  if (urlLower.includes('/fill/w_')) {
-    const widthMatch = urlLower.match(/\/fill\/w_(\d+)/);
-    if (widthMatch && parseInt(widthMatch[1]) > 1000) {
-      score -= 200; // Heavy penalty for images > 1000px wide
-    }
-  }
-  
-  return score;
+
+  scrapeWebsiteLogo(targetUrl)
+    .then((result) => {
+      console.log('🔍 Final scrape result:', result);
+
+      if (result.success) {
+        console.log(`🎯 Final logo URL: ${result.logoUrl}`);
+      } else {
+        console.error(`❌ Failed to find logo: ${result.error}`);
+      }
+
+      process.exit(result.success ? 0 : 1);
+    })
+    .catch((error) => {
+      console.error('Unexpected logo scraper error:', error);
+      process.exit(1);
+    });
 }
