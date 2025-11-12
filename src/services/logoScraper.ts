@@ -71,23 +71,7 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
       };
     }
 
-    const firecrawlResponse = await axios.post(
-      FIRECRAWL_API_URL,
-      {
-        url,
-        formats: ['html', 'markdown'],
-        onlyMainContent: false,
-        waitFor: 2000,
-        timeout: 30000,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 35000,
-      }
-    );
+    const firecrawlResponse = await fetchFirecrawlHtml(url);
 
     const html = firecrawlResponse.data?.data?.html || firecrawlResponse.data?.html;
     if (!html) {
@@ -552,6 +536,46 @@ function findFallbackLogoCandidate($: CheerioAPI, baseUrl: string, domainName?: 
   }
 
   return null;
+}
+
+async function fetchFirecrawlHtml(targetUrl: string) {
+  const payload = {
+    url: targetUrl,
+    formats: ['html', 'markdown'],
+    onlyMainContent: false,
+    waitFor: 4000,
+    timeout: 45000,
+  };
+
+  const maxAttempts = 2;
+  let attempt = 0;
+  let lastError: unknown = null;
+
+  while (attempt < maxAttempts) {
+    try {
+      attempt += 1;
+      return await axios.post(FIRECRAWL_API_URL, payload, {
+        headers: {
+          Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 50000,
+      });
+    } catch (error) {
+      lastError = error;
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+
+      if (attempt >= maxAttempts || (status && status < 500 && status !== 408)) {
+        throw error;
+      }
+
+      const backoffMs = 1000 * attempt;
+      console.warn(`Firecrawl attempt ${attempt} failed (${status ?? 'network'}). Retrying in ${backoffMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  throw lastError;
 }
 
 // ======= DOWNLOAD + VALIDATION =======
