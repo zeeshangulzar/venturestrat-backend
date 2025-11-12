@@ -2,20 +2,15 @@
 import 'dotenv/config';
 import { load, type CheerioAPI } from 'cheerio';
 import axios from 'axios';
-import { promises as fs } from 'fs';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { randomUUID } from 'crypto';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import sharp from 'sharp';
 import { uploadPublicFile, getSignedUrlForAsset } from './storage.js';
 
 const FIRECRAWL_API_URL = 'https://api.firecrawl.dev/v1/scrape';
 const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS ?? 20000);
-const execFileAsync = promisify(execFile);
 
 export interface LogoScrapingResult {
   success: boolean;
@@ -647,7 +642,9 @@ async function normalizeLogoBuffer(
   }
 
   try {
-    const pngBuffer = await convertBufferToPng(buffer, extensionFromContentType(normalizedType));
+    const pngBuffer = await sharp(buffer, { limitInputPixels: false })
+      .png({ quality: 90 })
+      .toBuffer();
     const pngBase64 = pngBuffer.toString('base64');
     console.log('🖼️ PNG conversion preview (base64 start):', pngBase64.slice(0, 120) + '...');
     console.log('🔗 Converted PNG data URL:', `data:image/png;base64,${pngBase64}`);
@@ -655,40 +652,6 @@ async function normalizeLogoBuffer(
   } catch (error) {
     console.warn('PNG normalization failed, keeping original logo buffer:', error);
     return { buffer, contentType: normalizedType, converted: false };
-  }
-}
-
-async function convertBufferToPng(buffer: Buffer, extension: string): Promise<Buffer> {
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'logo-scraper-'));
-  const inputPath = path.join(tmpDir, `${randomUUID()}.${extension || 'img'}`);
-  const outputPath = path.join(tmpDir, `${randomUUID()}.png`);
-
-  try {
-    await fs.writeFile(inputPath, buffer);
-    await execFileAsync('magick', ['convert', inputPath, outputPath], { timeout: 20000 });
-    return await fs.readFile(outputPath);
-  } finally {
-    await safeRemove(inputPath);
-    await safeRemove(outputPath);
-    await safeRemove(tmpDir, true);
-  }
-}
-
-function extensionFromContentType(contentType: string): string {
-  if (!contentType) return 'img';
-  if (contentType.includes('svg')) return 'svg';
-  if (contentType.includes('jpeg') || contentType.includes('jpg')) return 'jpg';
-  if (contentType.includes('webp')) return 'webp';
-  if (contentType.includes('gif')) return 'gif';
-  if (contentType.includes('bmp')) return 'bmp';
-  return contentType.split('/')[1]?.split('+')[0] || 'img';
-}
-
-async function safeRemove(targetPath: string, recursive = false) {
-  try {
-    await fs.rm(targetPath, { recursive, force: true });
-  } catch {
-    // ignore cleanup errors
   }
 }
 
