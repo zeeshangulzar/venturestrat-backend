@@ -184,9 +184,8 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
     if (isInlineSvg) {
       console.log('🎨 Type: Inline SVG (embedded in HTML)');
       console.log('🔗 Data URL:', finalLogoUrl.substring(0, 100) + '... (truncated)');
-    } else {
-      console.log('🔗 Original URL:', finalLogoUrl);
     }
+    console.log('🔗 Uploaded file URL:', finalLogoUrlSigned);
     console.log('📦 Content Type:', contentType);
     console.log(
       '📏 Logo Size:',
@@ -196,7 +195,7 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
 
     return {
       success: true,
-      logoUrl: finalLogoUrl, // or finalLogoUrlSigned if uploading
+      logoUrl: finalLogoUrlSigned,
     };
   } catch (error) {
     console.error('Error scraping logo:', error);
