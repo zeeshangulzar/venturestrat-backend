@@ -1674,7 +1674,7 @@ router.post('/message/:messageId/cancel', async (req, res) => {
       }
     }
 
-    await prisma.message.update({ where: { id: messageId }, data: { status: 'DRAFT', jobId: null, scheduledFor: null } });
+    await prisma.message.delete({ where: { id: messageId } });
     res.json({ message: 'Scheduled message cancelled successfully' });
   } catch (error: any) {
     console.error('Error cancelling scheduled message:', error);
