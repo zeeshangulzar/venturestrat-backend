@@ -846,15 +846,6 @@ export function cleanEmailBody(body: string): string {
     }
   });
 
-  $('img').each((_idx, el) => {
-    const element = $(el);
-    const existingStyle = element.attr('style') || '';
-    const merged = `${ensureStyleTerminated(existingStyle)}height: 20px; width: auto;`;
-    element.attr('style', merged.trim());
-    element.attr('height', '20');
-    element.attr('width', 'auto');
-  });
-
   // Return inner HTML without wrapping html/body tags
   const processedBody = $('body').html() || body;
   console.log('Processed email body:', processedBody);
