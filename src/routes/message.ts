@@ -7,6 +7,9 @@ import { clerkClient } from '@clerk/clerk-sdk-node';
 import { load } from 'cheerio';
 import { uploadFile, getFileUrl, generateUploadUrl, deleteFile } from '../services/storage.js';
 import { scheduleEmail, cancelScheduledEmail, ScheduledEmailJob } from '../services/emailQueue.js';
+import { uploadFile, getFileUrl } from '../services/storage.js';
+import { validateSubscriptionUsage, trackUsage } from '../middleware/subscriptionValidation.js';
+
 
 // Utility function to format file sizes
 const formatFileSize = (bytes: number): string => {
@@ -1199,6 +1202,17 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       return res.status(404).json({ error: 'Message not found' });
     }
 
+    // Validate subscription for email sending
+    const validation = await validateSubscriptionUsage(message.userId, 'send_email');
+    if (!validation.allowed) {
+      return res.status(403).json({ 
+        error: 'Subscription limit reached',
+        reason: validation.reason,
+        currentUsage: validation.currentUsage,
+        limits: validation.limits
+      });
+    }
+
     // Check if message is already sent
     if (message.status === 'SENT') {
       return res.status(400).json({ error: 'Message has already been sent' });
@@ -1318,6 +1332,9 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
         data: { status: 'CONTACTED' }
       });
     }
+
+    // Track usage after successful email sending
+    await trackUsage(message.userId, 'send_email');
 
     res.json({
       message: 'Email sent successfully',

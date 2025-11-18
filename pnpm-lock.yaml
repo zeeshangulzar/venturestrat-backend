@@ -77,6 +77,9 @@ importers:
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
+      stripe:
+        specifier: ^16.6.0
+        version: 16.12.0
       svix:
         specifier: ^1.75.0
         version: 1.75.0
@@ -2183,6 +2186,9 @@ packages:
 
   strnum@2.1.1:
     resolution: {integrity: sha512-7ZvoFTiCnGxBtDqJ//Cu6fWtZtc7Y3x+QOirG15wztbdngGSkht27o2pyGWrVy0b4WAy3jbKmnoK6g5VlVNUUw==}
+  stripe@16.12.0:
+    resolution: {integrity: sha512-H7eFVLDxeTNNSn4JTRfL2//LzCbDrMSZ+2q1c7CanVWgK2qIW5TwS+0V7N9KcKZZNpYh/uCqK0PyZh/2UsaAtQ==}
+    engines: {node: '>=12.*'}
 
   svix@1.75.0:
     resolution: {integrity: sha512-3GLI1DN4Pfd8Ze+7yxoV3Ocp8hW07/WRDsoIBdjDvR916Fx3gRHaYSoa0WWRdKSqJNj+OTCeDSSv47mSp9ibqw==}
@@ -5269,6 +5275,10 @@ snapshots:
       safe-buffer: 5.2.1
 
   strnum@2.1.1: {}
+  stripe@16.12.0:
+    dependencies:
+      '@types/node': 24.1.0
+      qs: 6.14.0
 
   svix@1.75.0:
     dependencies:

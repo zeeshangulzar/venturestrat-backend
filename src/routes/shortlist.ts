@@ -1,6 +1,7 @@
 // src/routes/shortlist.ts
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { validateSubscriptionUsage, trackUsage } from '../middleware/subscriptionValidation.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -36,12 +37,26 @@ router.post('/shortlist', async (req, res) => {
       return res.status(400).json({ message: 'Investor already shortlisted' });
     }
 
+    // Validate subscription for adding investor to CRM
+    const validation = await validateSubscriptionUsage(userId, 'add_investor');
+    if (!validation.allowed) {
+      return res.status(403).json({ 
+        error: 'Subscription limit reached',
+        reason: validation.reason,
+        currentUsage: validation.currentUsage,
+        limits: validation.limits
+      });
+    }
+
     const shortlist = await prisma.shortlist.create({
       data: {
         userId: user.id,
         investorId,
       },
     });
+
+    // Track usage after successful addition
+    await trackUsage(userId, 'add_investor');
 
     res.status(201).json(shortlist);
   } catch (error) {

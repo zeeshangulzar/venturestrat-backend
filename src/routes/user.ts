@@ -1,7 +1,9 @@
 // routes/user.ts
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, SubscriptionPlan, User } from '@prisma/client';
 import multer from 'multer';
+import type Stripe from 'stripe';
+import { stripeService } from '../services/stripeService.js';
 import { uploadPublicFile, getSignedUrlForAsset } from '../services/storage.js';
 
 const router = Router();
@@ -14,6 +16,31 @@ const upload = multer({
     fileSize: 5 * 1024 * 1024, // 5MB limit for logos
   },
 });
+
+const buildSubscriptionResponse = (user: User) => ({
+  plan: user.subscriptionPlan,
+  status: user.subscriptionStatus,
+  currentPeriodEnd: user.subscriptionCurrentPeriodEnd,
+  stripeCustomerId: user.stripeCustomerId,
+  stripeSubscriptionId: user.stripeSubscriptionId,
+  stripePaymentMethodId: user.stripePaymentMethodId,
+});
+
+const mapPaymentMethodSummary = (paymentMethod: Stripe.PaymentMethod | null) => {
+  if (!paymentMethod || paymentMethod.type !== 'card' || !paymentMethod.card) {
+    return null;
+  }
+
+  const { brand, last4, exp_month, exp_year } = paymentMethod.card;
+
+  return {
+    id: paymentMethod.id,
+    brand,
+    last4,
+    expMonth: exp_month ?? undefined,
+    expYear: exp_year ?? undefined,
+  };
+};
 
 router.post('/createOrFindUser', async (req, res) => {
   const { userId, email } = req.body;
@@ -121,6 +148,12 @@ router.put('/user/:userId', async (req, res) => {
         companyWebsite: updatedUser.companyWebsite,
         companyLogo: updatedUser.companyLogo,
         createdAt: updatedUser.createdAt,
+        stripeCustomerId: updatedUser.stripeCustomerId,
+        stripeSubscriptionId: updatedUser.stripeSubscriptionId,
+        stripePaymentMethodId: updatedUser.stripePaymentMethodId,
+        subscriptionPlan: updatedUser.subscriptionPlan,
+        subscriptionStatus: updatedUser.subscriptionStatus,
+        subscriptionCurrentPeriodEnd: updatedUser.subscriptionCurrentPeriodEnd,
       },
     });
   } catch (error) {
@@ -161,6 +194,12 @@ router.get('/user/:userId', async (req, res) => {
         companyWebsite: user.companyWebsite,
         companyLogo: user.companyLogo,
         createdAt: user.createdAt,
+        stripeCustomerId: user.stripeCustomerId,
+        stripeSubscriptionId: user.stripeSubscriptionId,
+        stripePaymentMethodId: user.stripePaymentMethodId,
+        subscriptionPlan: user.subscriptionPlan,
+        subscriptionStatus: user.subscriptionStatus,
+        subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd,
       },
       shortlistedInvestors: user.shortlists.map(shortlist => shortlist.investor),
       totalShortlisted: user.shortlists.length,
@@ -221,6 +260,197 @@ router.post('/user/upload-logo', upload.single('logo'), async (req, res) => {
   } catch (error) {
     console.error('Error uploading logo:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.get('/user/:userId/subscription', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    let paymentMethodSummary = null;
+
+    if (stripeService.isEnabled() && user.stripePaymentMethodId) {
+      try {
+        const paymentMethod = await stripeService.retrievePaymentMethod(user.stripePaymentMethodId);
+        paymentMethodSummary = mapPaymentMethodSummary(paymentMethod);
+      } catch (paymentMethodError) {
+        console.warn(`Failed to fetch payment method for user ${userId}:`, paymentMethodError);
+      }
+    }
+
+    return res.json({
+      subscription: buildSubscriptionResponse(user),
+      paymentMethod: paymentMethodSummary,
+    });
+  } catch (error) {
+    console.error('Error fetching subscription:', error);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.post('/user/:userId/subscription', async (req, res) => {
+  const { userId } = req.params;
+  const { plan, paymentMethodId } = req.body as { plan?: string; paymentMethodId?: string };
+
+  const normalizedPlan = typeof plan === 'string' ? plan.toUpperCase() : '';
+
+  if (!Object.values(SubscriptionPlan).includes(normalizedPlan as SubscriptionPlan)) {
+    return res.status(400).json({ error: 'Invalid subscription plan' });
+  }
+
+  if (!stripeService.isEnabled()) {
+    return res.status(503).json({ error: 'Stripe is not configured' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const targetPlan = normalizedPlan as SubscriptionPlan;
+
+    const customerId = await stripeService.ensureCustomer({
+      userId,
+      email: user.email,
+      name: [user.firstname, user.lastname].filter(Boolean).join(' ') || null,
+      existingCustomerId: user.stripeCustomerId,
+    });
+
+    let paymentMethodToPersist = user.stripePaymentMethodId ?? null;
+
+
+    if (paymentMethodId) {
+      try {
+        await stripeService.attachPaymentMethodToCustomer({
+          customerId,
+          paymentMethodId,
+          makeDefault: true,
+        });
+        paymentMethodToPersist = paymentMethodId;
+      } catch (attachError) {
+        console.error(`Failed to attach payment method for user ${userId}:`, attachError);
+        return res.status(400).json({ error: 'Unable to attach payment method' });
+      }
+    }
+
+    let subscription: Stripe.Subscription;
+
+    if (user.stripeSubscriptionId) {
+      if (targetPlan !== user.subscriptionPlan) {
+        subscription = await stripeService.updateSubscription({
+          subscriptionId: user.stripeSubscriptionId,
+          plan: targetPlan,
+        });
+      } else {
+        subscription = await stripeService.retrieveSubscription(user.stripeSubscriptionId);
+      }
+    } else {
+      subscription = await stripeService.createSubscription({
+        userId,
+        customerId,
+        plan: targetPlan,
+      });
+    }
+
+    const defaultPaymentMethodId =
+      typeof subscription.default_payment_method === 'string'
+        ? subscription.default_payment_method
+        : subscription.default_payment_method?.id ?? null;
+
+    if (!paymentMethodToPersist && defaultPaymentMethodId) {
+      paymentMethodToPersist = defaultPaymentMethodId;
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: subscription.id,
+        subscriptionPlan: targetPlan,
+        subscriptionStatus: subscription.status,
+        subscriptionCurrentPeriodEnd: subscription.current_period_end
+          ? new Date(subscription.current_period_end * 1000)
+          : null,
+        stripePaymentMethodId: paymentMethodToPersist,
+      },
+    });
+
+    let paymentMethodSummary = null;
+
+    if (stripeService.isEnabled() && paymentMethodToPersist) {
+      try {
+        const paymentMethod = await stripeService.retrievePaymentMethod(paymentMethodToPersist);
+        paymentMethodSummary = mapPaymentMethodSummary(paymentMethod);
+      } catch (paymentMethodError) {
+        console.warn(`Failed to fetch payment method for user ${userId}:`, paymentMethodError);
+      }
+    }
+
+    return res.json({
+      subscription: buildSubscriptionResponse(updatedUser),
+      paymentMethod: paymentMethodSummary,
+    });
+  } catch (error) {
+    console.error(`Error updating subscription for user ${userId}:`, error);
+    return res.status(500).json({ error: 'Unable to update subscription' });
+  }
+});
+
+router.post('/user/:userId/subscription/intent', async (req, res) => {
+  const { userId } = req.params;
+
+  if (!stripeService.isEnabled()) {
+    return res.status(503).json({ error: 'Stripe is not configured' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const customerId = await stripeService.ensureCustomer({
+      userId,
+      email: user.email,
+      name: [user.firstname, user.lastname].filter(Boolean).join(' ') || null,
+      existingCustomerId: user.stripeCustomerId,
+    });
+
+    if (!user.stripeCustomerId || user.stripeCustomerId !== customerId) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          stripeCustomerId: customerId,
+        },
+      });
+    }
+
+    const intent = await stripeService.createSetupIntent({
+      customerId,
+    });
+
+    return res.json({
+      clientSecret: intent.client_secret,
+      stripeCustomerId: customerId,
+    });
+  } catch (error) {
+    console.error(`Error creating setup intent for user ${userId}:`, error);
+    return res.status(500).json({ error: 'Unable to prepare payment method' });
   }
 });
 

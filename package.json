@@ -38,7 +38,9 @@
     "nodemailer": "^7.0.10",
     "sharp": "^0.34.5",
     "svix": "^1.75.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "stripe": "^16.6.0",
+    "svix": "^1.75.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
