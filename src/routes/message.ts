@@ -1413,15 +1413,18 @@ router.post('/message/schedule', async (req, res) => {
 
   try {
     // Validate required fields
-    if (!userId || !investorId || !to || !subject || !from || !body || !scheduledFor) {
+    if (!userId || !investorId || !to || !subject || !from || !body) {
       return res.status(400).json({
-        error: 'Missing required fields: userId, investorId, to, subject, from, body, scheduledFor'
+        error: 'Missing required fields: userId, investorId, to, subject, from, body'
       });
     }
 
-    const scheduledDate = new Date(scheduledFor);
-    if (isNaN(scheduledDate.getTime()) || scheduledDate <= new Date()) {
-      return res.status(400).json({ error: 'Scheduled time must be in the future' });
+    let scheduledDate: Date | null = null;
+    if (scheduledFor !== undefined && scheduledFor !== null) {
+      scheduledDate = new Date(scheduledFor);
+      if (isNaN(scheduledDate.getTime()) || scheduledDate <= new Date()) {
+        return res.status(400).json({ error: 'Scheduled time must be in the future' });
+      }
     }
 
     // Ensure user exists
@@ -1464,33 +1467,84 @@ router.post('/message/schedule', async (req, res) => {
       }
     });
 
-    // Schedule the BullMQ job
-    const job = await scheduleEmail(scheduledDate, {
-      messageId: message.id,
-      userId,
-      investorId,
-      to: message.to,
-      cc: message.cc,
-      subject,
-      from,
-      body,
-      threadId: inheritedThreadId || undefined,
-      previousMessageId: referenceSourceId,
-    } as ScheduledEmailJob);
-
-    // Save jobId for potential cancellation
-    await prisma.message.update({
-      where: { id: message.id },
-      data: { jobId: job.id }
-    });
-
     res.status(201).json({
       message: 'Message scheduled successfully',
-      data: { ...message, jobId: job.id }
+      data: { ...message, jobId: null }
     });
   } catch (error) {
     console.error('Error scheduling message:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Set or update schedule for an existing message and create the BullMQ job
+router.post('/message/:messageId/schedule', async (req, res) => {
+  const { messageId } = req.params;
+  const { scheduledFor } = req.body || {};
+
+  if (!scheduledFor) {
+    return res.status(400).json({ error: 'scheduledFor is required' });
+  }
+
+  const scheduledDate = new Date(scheduledFor);
+  if (isNaN(scheduledDate.getTime()) || scheduledDate <= new Date()) {
+    return res.status(400).json({ error: 'Scheduled time must be in the future' });
+  }
+
+  try {
+    const message = await prisma.message.findUnique({ where: { id: messageId } });
+
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    if (message.status !== 'SCHEDULED') {
+      return res.status(400).json({ error: 'Message is not in a schedulable state' });
+    }
+
+    if (message.jobId) {
+      try {
+        await cancelScheduledEmail(message.jobId);
+      } catch (error) {
+        console.warn('Failed to cancel existing scheduled job:', error);
+      }
+    }
+
+    const attachments = normalizeAttachmentMetadataList(message.attachments);
+    const job = await scheduleEmail(scheduledDate, {
+      messageId: message.id,
+      userId: message.userId,
+      investorId: message.investorId,
+      to: message.to,
+      cc: message.cc,
+      subject: message.subject || 'Follow up',
+      from: message.from,
+      body: message.body,
+      attachments: attachments
+        .filter((attachment) => Boolean(attachment.url))
+        .map((attachment) => ({
+          key: attachment.key || attachment.filename,
+          filename: attachment.filename,
+          type: attachment.type,
+          size: attachment.size,
+          url: attachment.url as string,
+        })),
+      threadId: message.threadId || undefined,
+      previousMessageId: message.previousMessageId || undefined,
+    } as ScheduledEmailJob);
+
+    const updatedMessage = await prisma.message.update({
+      where: { id: messageId },
+      data: { scheduledFor: scheduledDate, jobId: job.id, status: 'SCHEDULED' },
+    });
+
+    res.json({
+      message: 'Schedule updated successfully',
+      data: updatedMessage,
+    });
+  } catch (error: any) {
+    console.error('Error creating schedule for message:', error);
+    res.status(500).json({ error: 'Failed to schedule message', details: error?.message });
   }
 });
 
