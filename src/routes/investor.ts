@@ -4,7 +4,7 @@ const router = Router();
 const prisma = new PrismaClient();
 const clean = (v?: string | null) => (v ?? '').trim();
 const norm = (s?: string | null) => (s ?? '').trim().toLowerCase();
-import { smartRefreshAvatarUrl } from '../utils/s3UrlHelpers';
+import { smartRefreshAvatarUrl } from '../utils/s3UrlHelpers.js';
 
 /**
  * Returns investor with a fresh, signed avatar URL (and persists if it changed).
