@@ -4,6 +4,26 @@ const router = Router();
 const prisma = new PrismaClient();
 const clean = (v?: string | null) => (v ?? '').trim();
 const norm = (s?: string | null) => (s ?? '').trim().toLowerCase();
+import { smartRefreshAvatarUrl } from '../utils/s3UrlHelpers.js';
+
+/**
+ * Returns investor with a fresh, signed avatar URL (and persists if it changed).
+ */
+async function withFreshAvatar<T extends { id: string; avatar: string | null }>(investor: T): Promise<T> {
+  if (!investor?.avatar) return investor;
+
+  const freshAvatarUrl = await smartRefreshAvatarUrl(investor.avatar);
+  if (freshAvatarUrl !== investor.avatar) {
+    await prisma.investor.update({
+      where: { id: investor.id },
+      data: { avatar: freshAvatarUrl },
+    });
+    return { ...investor, avatar: freshAvatarUrl };
+  }
+
+  return investor;
+}
+
 
 type InvestorScopeConfig = {
   orderBy: Prisma.InvestorOrderByWithRelationInput[];
@@ -289,8 +309,12 @@ router.get('/investors', async (req, res) => {
       investors.push(...noCountryInvestors);
     }
 
+    const investorsWithFreshAvatars = await Promise.all(
+      investors.map((inv) => withFreshAvatar(inv))
+    );
+
     res.json({
-      investors,
+      investors: investorsWithFreshAvatars,
       pagination: {
         currentPage: safePageNumber,
         totalPages,
@@ -358,7 +382,7 @@ router.get('/investors/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const investor = await prisma.investor.findUnique({
+    const investorRecord = await prisma.investor.findUnique({
       where: { id },
       include: {
         emails: true,
@@ -370,9 +394,11 @@ router.get('/investors/:id', async (req, res) => {
       },
     });
 
-    if (!investor) {
+    if (!investorRecord) {
       return res.status(404).json({ error: 'Investor not found' });
     }
+
+    const investor = await withFreshAvatar(investorRecord);
 
     res.json({ investor });
   } catch (error) {
