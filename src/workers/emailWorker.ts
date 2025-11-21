@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { cleanEmailBody, sendViaSendgridFallback } from '../routes/message.js';
+import { validateSubscriptionUsage } from '../middleware/subscriptionValidation.js';
 
 const prisma = new PrismaClient();
 
@@ -103,6 +104,15 @@ const emailWorker = new Worker(
         throw new Error(`Message ${messageId} not found`);
       }
 
+      const validation = await validateSubscriptionUsage(message.userId, 'follow_up_email');
+      if (!validation.allowed) { 
+        throw {
+          error: 'Subscription limit reached',
+          reason: validation.reason,
+          currentUsage: validation.currentUsage,
+          limits: validation.limits
+        };
+      }
       const previousMessage = message.previousMessage ?? (message.previousMessageId
         ? await prisma.message.findUnique({ where: { id: message.previousMessageId }, select: previousMessageSelect })
         : null);

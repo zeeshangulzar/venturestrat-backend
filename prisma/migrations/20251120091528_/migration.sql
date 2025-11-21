@@ -7,7 +7,7 @@
 
 */
 -- CreateEnum
-CREATE TYPE "public"."SubscriptionPlan" AS ENUM ('FREE', 'PREMIUM', 'EXCLUSIVE');
+CREATE TYPE "public"."SubscriptionPlan" AS ENUM ('FREE', 'STARTER', 'PRO', 'SCALE');
 
 -- AlterTable
 ALTER TABLE "public"."User" ADD COLUMN     "stripeCustomerId" TEXT,
@@ -29,6 +29,7 @@ CREATE TABLE "public"."usage_tracking" (
     "year" INTEGER NOT NULL,
     "monthlyEmailsSent" INTEGER NOT NULL DEFAULT 0,
     "monthlyInvestorsAdded" INTEGER NOT NULL DEFAULT 0,
+    "monthlyFollowUpEmailsSent" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

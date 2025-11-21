@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 
-type PlanKey = 'FREE' | 'PREMIUM' | 'EXCLUSIVE';
+type PlanKey = 'FREE' | 'STARTER' | 'PRO' | 'SCALE';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
@@ -12,8 +12,9 @@ const stripeClient = stripeSecretKey
 
 const planPriceMap: Record<PlanKey, string | undefined> = {
   FREE: process.env.STRIPE_FREE_PRICE_ID,
-  PREMIUM: process.env.STRIPE_PREMIUM_PRICE_ID,
-  EXCLUSIVE: process.env.STRIPE_EXCLUSIVE_PRICE_ID,
+  STARTER: process.env.STRIPE_STARTER_PRICE_ID,
+  PRO: process.env.STRIPE_PRO_PRICE_ID,
+  SCALE: process.env.STRIPE_SCALE_PRICE_ID,
 };
 
 const assertStripeClient = (): Stripe => {

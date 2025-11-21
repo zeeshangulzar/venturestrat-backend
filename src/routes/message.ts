@@ -7,7 +7,6 @@ import { clerkClient } from '@clerk/clerk-sdk-node';
 import { load } from 'cheerio';
 import { uploadFile, getFileUrl, generateUploadUrl, deleteFile } from '../services/storage.js';
 import { scheduleEmail, cancelScheduledEmail, ScheduledEmailJob } from '../services/emailQueue.js';
-import { uploadFile, getFileUrl } from '../services/storage.js';
 import { validateSubscriptionUsage, trackUsage } from '../middleware/subscriptionValidation.js';
 
 
@@ -449,7 +448,6 @@ async function sendViaMicrosoftGraph(accessToken: string, message: any, attachme
     saveToSentItems: true
   };
 
-  console.log('Microsoft Graph email content with attachments:', cleanedBody);
   console.log('Microsoft Graph attachment links:', attachmentLinks);
   console.log('Microsoft Graph email message:', JSON.stringify(emailMessage, null, 2));
 
@@ -607,7 +605,7 @@ const FONT_FAMILY_MAP: Record<string, string> = {
   'open-sans': '"Open Sans", Arial, sans-serif',
   'lato': '"Lato", Arial, sans-serif',
   'montserrat': '"Montserrat", Arial, sans-serif',
-  'source-sans-pro': '"Source Sans Pro", Arial, sans-serif',
+  'source-sans-pro': '"Source Sans PRO", Arial, sans-serif',
   'raleway': '"Raleway", Arial, sans-serif',
   'pt-sans': '"PT Sans", Arial, sans-serif',
   'oswald': '"Oswald", Arial, sans-serif',
@@ -640,7 +638,7 @@ const FONT_FAMILY_MAP: Record<string, string> = {
   'space-mono': '"Space Mono", monospace',
   'jetbrains-mono': '"JetBrains Mono", monospace',
   'fira-code': '"Fira Code", monospace',
-  'source-code-pro': '"Source Code Pro", monospace'
+  'source-code-pro': '"Source Code PRO", monospace'
 };
 
 const SIZE_MAP: Record<string, string> = {
@@ -662,9 +660,7 @@ const ensureStyleTerminated = (style: string): string => {
 };
 
 // Detect which Google Fonts are used in the email content
-export function detectGoogleFonts(htmlContent: string): string[] {
-  console.log('detectGoogleFonts called with content length:', htmlContent.length);
-  
+export function detectGoogleFonts(htmlContent: string): string[] {  
   const googleFontNames = [
     'roboto', 'open-sans', 'lato', 'montserrat', 'source-sans-pro', 'raleway',
     'pt-sans', 'oswald', 'lora', 'merriweather', 'playfair-display', 'nunito',
@@ -691,12 +687,10 @@ export function detectGoogleFonts(htmlContent: string): string[] {
     
     const isUsed = patterns.some(pattern => pattern.test(htmlContent));
     if (isUsed) {
-      console.log(`Google Font detected: ${fontName}`);
       usedFonts.push(fontName);
     }
   });
   
-  console.log('Total Google Fonts detected:', usedFonts.length);
   return usedFonts;
 }
 
@@ -723,7 +717,7 @@ export function generateEmailHTML(body: string, googleFonts: string[]): string {
         'open-sans': 'Open+Sans:wght@300;400;600;700',
         'lato': 'Lato:wght@300;400;700',
         'montserrat': 'Montserrat:wght@300;400;500;600;700',
-        'source-sans-pro': 'Source+Sans+Pro:wght@300;400;600;700',
+        'source-sans-pro': 'Source+Sans+PRO:wght@300;400;600;700',
         'raleway': 'Raleway:wght@300;400;500;600;700',
         'pt-sans': 'PT+Sans:wght@400;700',
         'oswald': 'Oswald:wght@300;400;500;600;700',
@@ -756,7 +750,7 @@ export function generateEmailHTML(body: string, googleFonts: string[]): string {
         'space-mono': 'Space+Mono:wght@400;700',
         'jetbrains-mono': 'JetBrains+Mono:wght@300;400;500;600;700',
         'fira-code': 'Fira+Code:wght@300;400;500;600;700',
-        'source-code-pro': 'Source+Code+Pro:wght@300;400;500;600;700'
+        'source-code-pro': 'Source+Code+PRO:wght@300;400;500;600;700'
       };
       return fontMap[font] || font;
     });
@@ -782,7 +776,6 @@ export function generateEmailHTML(body: string, googleFonts: string[]): string {
 }
 
 export function cleanEmailBody(body: string): string {
-  console.log('Original email body:', body);
   const $ = load(body);
 
   // Process Quill editor classes and convert them to inline styles for email compatibility
@@ -797,7 +790,6 @@ export function cleanEmailBody(body: string): string {
         // Convert Quill font classes to inline font-family styles
         const key = cls.replace('ql-font-', '');
         const family = FONT_FAMILY_MAP[key];
-        console.log(`Processing font class: ${cls}, key: ${key}, family: ${family}`);
         if (family) {
           const existingStyle = element.attr('style') || '';
           const merged = `${ensureStyleTerminated(existingStyle)}font-family: ${family};`;
@@ -851,7 +843,6 @@ export function cleanEmailBody(body: string): string {
 
   // Return inner HTML without wrapping html/body tags
   const processedBody = $('body').html() || body;
-  console.log('Processed email body:', processedBody);
   return processedBody;
 }
 
@@ -1172,9 +1163,6 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
           };
           b2Attachments.push(b2FileInfo);
           
-          console.log(`B2 file uploaded: ${fileKey}`);
-          console.log(`B2 URL generated: ${b2FileInfo.url}`);
-          
           // For email sending, we'll include download links instead of base64 content
           // This is more efficient and avoids email size limits
           emailAttachments.push({
@@ -1186,9 +1174,6 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
         }
       }
     }
-    
-    console.log(`Total attachments processed: ${emailAttachments.length}`);
-    console.log('Email attachments for sending:', JSON.stringify(emailAttachments, null, 2));
     // Get the message
     const message = await prisma.message.findUnique({
       where: { id: messageId },
@@ -1247,8 +1232,6 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
     
     // Check if Google Fonts are used in the email body
     const googleFonts = detectGoogleFonts(cleanBody);
-    console.log('Detected Google Fonts:', googleFonts);
-    console.log('Clean body for font detection:', cleanBody.substring(0, 500) + '...');
     
     // Generate HTML with proper font support and attachment links
     let htmlContent = generateEmailHTML(cleanBody, googleFonts);
@@ -1480,6 +1463,8 @@ router.post('/message/schedule', async (req, res) => {
         previousMessageId: referenceSourceId,
       }
     });
+    console.log('Follow up emails count', message.id);
+    await trackUsage(message.userId, 'follow_up_email');
 
     // Schedule the BullMQ job
     const job = await scheduleEmail(scheduledDate, {
@@ -1549,6 +1534,15 @@ router.post('/message/:messageId/send-reply', upload.any(), async (req, res) => 
     });
 
     if (!message) return res.status(404).json({ error: 'Message not found' });
+    const validation = await validateSubscriptionUsage(message.userId, 'follow_up_email');
+    if (!validation.allowed) {
+      return res.status(403).json({ 
+        error: 'Subscription limit reached',
+        reason: validation.reason,
+        currentUsage: validation.currentUsage,
+        limits: validation.limits
+      });
+    }
     if (message.status !== 'SCHEDULED') {
       return res.status(400).json({ error: 'Message is not scheduled' });
     }

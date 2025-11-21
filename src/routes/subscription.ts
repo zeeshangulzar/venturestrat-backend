@@ -94,7 +94,8 @@ router.get('/subscription/usage/:userId', async (req, res) => {
       },
       monthly: {
         emailsSent: monthlyUsage?.monthlyEmailsSent || 0,
-        investorsAdded: monthlyUsage?.monthlyInvestorsAdded || 0
+        investorsAdded: monthlyUsage?.monthlyInvestorsAdded || 0,
+        monthlyFollowUpEmailsSent: monthlyUsage?.monthlyFollowUpEmailsSent || 0
       },
       subscription: subscriptionInfo
     });

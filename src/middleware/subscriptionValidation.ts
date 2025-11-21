@@ -12,6 +12,7 @@ export interface SubscriptionValidationResult {
     investorsAdded: number;
     monthlyEmailsSent?: number;
     monthlyInvestorsAdded?: number;
+    followUpEmailsPerMonth?: number;
   };
   limits: {
     aiDraftsPerDay: number;
@@ -24,13 +25,13 @@ export interface SubscriptionValidationResult {
 
 export async function validateSubscriptionUsage(
   userId: string,
-  action: 'ai_draft' | 'send_email' | 'add_investor'
+  action: 'ai_draft' | 'send_email' | 'add_investor' | 'download_csv' | 'follow_up_email'
 ): Promise<SubscriptionValidationResult> {
   try {
     // Get user subscription plan
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { subscriptionPlan: true }
+      select: { subscriptionPlan: true, subscriptionCurrentPeriodEnd: true }
     });
 
     if (!user) {
@@ -72,41 +73,62 @@ export async function validateSubscriptionUsage(
       emailsSent: todayUsage?.emailsSent || 0,
       investorsAdded: todayUsage?.investorsAdded || 0,
       monthlyEmailsSent: monthlyUsage?.monthlyEmailsSent || 0,
-      monthlyInvestorsAdded: monthlyUsage?.monthlyInvestorsAdded || 0
+      monthlyInvestorsAdded: monthlyUsage?.monthlyInvestorsAdded || 0,
+      monthlyFollowUpEmailsSent: monthlyUsage?.monthlyFollowUpEmailsSent || 0,
     };
 
     // Check limits based on action
     let allowed = true;
     let reason = '';
+    const trialExpired =
+      user.subscriptionPlan === 'FREE' &&
+      user.subscriptionCurrentPeriodEnd &&
+      user.subscriptionCurrentPeriodEnd <= new Date();
 
-    if (action === 'ai_draft') {
-      if (currentUsage.aiDraftsUsed >= planLimits.aiDraftsPerDay) {
-        allowed = false;
-        reason = `Daily AI draft limit reached (${planLimits.aiDraftsPerDay}/day)`;
-      }
+    if(trialExpired){
+      allowed = false;
+      reason = `New users on the Free plan can only use the service for 3 days. Please upgrade to continue using the service.`;
+    } else if (action === 'ai_draft') {
+        if (currentUsage.aiDraftsUsed >= planLimits.aiDraftsPerDay) {
+          allowed = false;
+          reason = `Daily AI draft limit reached (${planLimits.aiDraftsPerDay}/day)`;
+        }
     } else if (action === 'send_email') {
-      if (planName === 'FREE') {
-        if (currentUsage.emailsSent >= (planLimits.emailsPerDay || 0)) {
-          allowed = false;
-          reason = `Daily email limit reached (${planLimits.emailsPerDay}/day)`;
+        if (planName === 'FREE') {
+          if (currentUsage.emailsSent >= (planLimits.emailsPerDay || 0)) {
+            allowed = false;
+            reason = `Daily email limit reached (${planLimits.emailsPerDay}/day)`;
+          }
+        } else {
+          if (currentUsage.monthlyEmailsSent >= (planLimits.emailsPerMonth || 0)) {
+            allowed = false;
+            reason = `Monthly email limit reached (${planLimits.emailsPerMonth}/month)`;
+          }
         }
-      } else {
-        if (currentUsage.monthlyEmailsSent >= (planLimits.emailsPerMonth || 0)) {
-          allowed = false;
-          reason = `Monthly email limit reached (${planLimits.emailsPerMonth}/month)`;
-        }
-      }
     } else if (action === 'add_investor') {
-      if (planName === 'FREE') {
-        if (currentUsage.investorsAdded >= (planLimits.investorsPerDay || 0)) {
-          allowed = false;
-          reason = `Daily investor limit reached (${planLimits.investorsPerDay}/day)`;
+        if (planName === 'FREE') {
+          if (currentUsage.investorsAdded >= (planLimits.investorsPerDay || 0)) {
+            allowed = false;
+            reason = `Daily investor limit reached (${planLimits.investorsPerDay}/day)`;
+          }
+        } else {
+          if (currentUsage.monthlyInvestorsAdded >= (planLimits.investorsPerMonth || 0)) {
+            allowed = false;
+            reason = `Monthly investor limit reached (${planLimits.investorsPerMonth}/month)`;
+          }
         }
-      } else {
-        if (currentUsage.monthlyInvestorsAdded >= (planLimits.investorsPerMonth || 0)) {
-          allowed = false;
-          reason = `Monthly investor limit reached (${planLimits.investorsPerMonth}/month)`;
-        }
+    } else if (action === 'download_csv') {
+      const plan = SUBSCRIPTION_PLANS[planName];
+      console.log('Download CSV:', planName, plan.features.canDownloadCSV);
+      if (!plan.features.canDownloadCSV) {
+        allowed = false;
+        reason = 'Your plan does not allow CSV downloads.';
+      }
+    } else if (action === 'follow_up_email') {
+      console.log('Follow-up Email:, plan name, monthlyFollowUpEmailsSent, followUpEmailsPerMonth', planName, currentUsage.monthlyFollowUpEmailsSent, planLimits.followUpEmailsPerMonth);
+      if (planName === 'STARTER' && (currentUsage.monthlyFollowUpEmailsSent >= (planLimits.followUpEmailsPerMonth || 0))) {
+        allowed = false;
+        reason = 'Follow-up emails are not available on your current plan.';
       }
     }
 
@@ -129,7 +151,7 @@ export async function validateSubscriptionUsage(
 
 export async function trackUsage(
   userId: string,
-  action: 'ai_draft' | 'send_email' | 'add_investor'
+  action: 'ai_draft' | 'send_email' | 'add_investor' | 'download_csv' | 'follow_up_email'
 ): Promise<void> {
   try {
     const today = new Date();
@@ -157,11 +179,13 @@ export async function trackUsage(
           investorsAdded: action === 'add_investor' ? existingUsage.investorsAdded + 1 : existingUsage.investorsAdded,
           monthlyEmailsSent: action === 'send_email' ? existingUsage.monthlyEmailsSent + 1 : existingUsage.monthlyEmailsSent,
           monthlyInvestorsAdded: action === 'add_investor' ? existingUsage.monthlyInvestorsAdded + 1 : existingUsage.monthlyInvestorsAdded,
+          monthlyFollowUpEmailsSent: action === 'follow_up_email' ? existingUsage.monthlyFollowUpEmailsSent + 1 : existingUsage.monthlyFollowUpEmailsSent,
         }
       });
+      console.log(`Tracked usage for user ${userId}: action=${action} and updated existing record.${existingUsage.id}`);
     } else {
       // Create new record
-      await prisma.usageTracking.create({
+      const newUsage = await prisma.usageTracking.create({
         data: {
           userId,
           date: dateOnly,
@@ -172,8 +196,10 @@ export async function trackUsage(
           investorsAdded: action === 'add_investor' ? 1 : 0,
           monthlyEmailsSent: action === 'send_email' ? 1 : 0,
           monthlyInvestorsAdded: action === 'add_investor' ? 1 : 0,
+          monthlyFollowUpEmailsSent: action === 'follow_up_email' ? 1 : 0,
         }
       });
+      console.log(`Tracked usage for user ${userId}: action=${action} and updated existing record.${newUsage.id}`);
     }
   } catch (error) {
     console.error('Error tracking usage:', error);

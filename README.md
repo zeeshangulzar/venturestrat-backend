@@ -49,8 +49,8 @@ CLERK_SECRET_KEY=sk_test_your_secret_key_here
 # Stripe Configuration
 STRIPE_SECRET_KEY=sk_live_or_test_key_from_stripe
 STRIPE_FREE_PRICE_ID=price_id_for_free_plan
-STRIPE_PREMIUM_PRICE_ID=price_id_for_premium_plan
-STRIPE_EXCLUSIVE_PRICE_ID=price_id_for_exclusive_plan
+STRIPE_PRO_PRICE_ID=price_id_for_premium_plan
+STRIPE_SCALE_PRICE_ID=price_id_for_exclusive_plan
 ```
 
 ### 4. Setup Clerk Webhooks

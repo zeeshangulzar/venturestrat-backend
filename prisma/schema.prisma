@@ -30,8 +30,9 @@ enum MessageStatus {
 
 enum SubscriptionPlan {
   FREE
-  PREMIUM
-  EXCLUSIVE
+  STARTER
+  PRO
+  SCALE
 }
 
 /* =========================
@@ -238,6 +239,7 @@ model UsageTracking {
   year       Int      // e.g., 2024
   monthlyEmailsSent Int @default(0)
   monthlyInvestorsAdded Int @default(0)
+  monthlyFollowUpEmailsSent Int @default(0)
   
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

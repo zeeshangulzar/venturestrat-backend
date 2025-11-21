@@ -8,12 +8,14 @@ export interface SubscriptionPlan {
     aiDraftsPerDay: number;
     investorsPerDay?: number; // For free trial
     emailsPerDay?: number; // For free trial
+    followUpEmailsPerMonth?: number; // For starter plan
   };
   features: {
     showFullContactInfo: boolean;
     advancedFilters: boolean;
     prioritySupport: boolean;
     customIntegrations: boolean;
+    canDownloadCSV: boolean;
   };
 }
 
@@ -22,10 +24,10 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
     name: 'Free Trial',
     price: 0,
     limits: {
-      investorsPerDay: 5,
-      emailsPerDay: 1,
-      aiDraftsPerDay: 1,
-      investorsPerMonth: 0, // Not applicable for daily limits
+      investorsPerDay: 25,
+      emailsPerDay: 3,
+      aiDraftsPerDay: 3,
+      investorsPerMonth: 25, // Not applicable for daily limits
       emailsPerMonth: 0, // Not applicable for daily limits
     },
     features: {
@@ -33,14 +35,16 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
       advancedFilters: false,
       prioritySupport: false,
       customIntegrations: false,
+      canDownloadCSV: false,
     },
   },
-  PREMIUM: {
-    name: 'Premium',
-    price: 99,
+  STARTER: {
+    name: 'Starter',
+    price: 66,
     limits: {
-      investorsPerMonth: 150,
-      emailsPerMonth: 150,
+      investorsPerMonth: 125,
+      emailsPerMonth: 125,
+      followUpEmailsPerMonth: 5,
       aiDraftsPerDay: 5,
     },
     features: {
@@ -48,21 +52,41 @@ export const SUBSCRIPTION_PLANS: Record<string, SubscriptionPlan> = {
       advancedFilters: true,
       prioritySupport: true,
       customIntegrations: false,
+      canDownloadCSV: true,
     },
   },
-  EXCLUSIVE: {
-    name: 'Exclusive',
-    price: 249,
+  PRO: {
+    name: 'Pro',
+    price: 99,
     limits: {
-      investorsPerMonth: 750,
-      emailsPerMonth: 750,
+      investorsPerMonth: 500,
+      emailsPerMonth: 500,
+      aiDraftsPerDay: 5,
+      followUpEmailsPerMonth: 500,
+    },
+    features: {
+      showFullContactInfo: true,
+      advancedFilters: true,
+      prioritySupport: true,
+      customIntegrations: false,
+      canDownloadCSV: true,
+    },
+  },
+  SCALE: {
+    name: 'Scale',
+    price: 179,
+    limits: {
+      investorsPerMonth: 1000,
+      emailsPerMonth: 1000,
       aiDraftsPerDay: 25,
+      followUpEmailsPerMonth: 1000,
     },
     features: {
       showFullContactInfo: true,
       advancedFilters: true,
       prioritySupport: true,
       customIntegrations: true,
+      canDownloadCSV: true,
     },
   },
 };
