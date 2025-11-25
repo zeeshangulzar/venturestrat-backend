@@ -362,10 +362,6 @@ async function sendViaGmail(accessToken: string, message: any, attachmentLinks: 
   ];
 
   const rawMessage = [...headerLines, ...emailContent].join("\r\n");
-  
-  console.log('Gmail email content with attachments:', cleanedBody);
-  console.log('Gmail attachment links:', attachmentLinks);
-
   const encodedMessage = Buffer.from(rawMessage)
     .toString("base64")
     .replace(/\+/g, "-")
@@ -1204,7 +1200,18 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       return res.status(400).json({ error: 'Message has already been sent' });
     }
 
-    // Check for Google OAuth tokens first
+    // Check external accounts & tokens (prefer Gmail; avoid falling back if connected but missing tokens)
+    let hasGoogleAccount = false;
+    let hasMicrosoftAccount = false;
+    try {
+      const clerkUser = await clerkClient.users.getUser(message.userId);
+      const accounts = clerkUser?.externalAccounts || [];
+      hasGoogleAccount = accounts.some((acc: any) => acc.provider?.includes('google'));
+      hasMicrosoftAccount = accounts.some((acc: any) => acc.provider?.includes('microsoft'));
+    } catch (error) {
+      console.warn('Failed to read Clerk external accounts:', error);
+    }
+
     let googleTokens;
     try {
       googleTokens = await clerkClient.users.getUserOauthAccessToken(
@@ -1215,7 +1222,6 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       console.log('No Google OAuth tokens found, checking Microsoft...');
     }
 
-    // Check for Microsoft OAuth tokens if no Google tokens
     let microsoftTokens;
     if (!googleTokens?.data || googleTokens.data.length === 0) {
       try {
@@ -1224,8 +1230,19 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
           "oauth_microsoft"
         );
       } catch (error) {
-      console.log('No Microsoft OAuth tokens found either, will use Nodemailer fallback...');
+        console.log('No Microsoft OAuth tokens found either, will use Nodemailer fallback...');
       }
+    }
+
+    const hasGoogleTokens = !!(googleTokens?.data && googleTokens.data.length > 0);
+    const hasMicrosoftTokens = !!(microsoftTokens?.data && microsoftTokens.data.length > 0);
+
+    // If the user connected Gmail but we cannot retrieve tokens, force reconnect instead of falling back to SendGrid
+    if (hasGoogleAccount && !hasGoogleTokens && !hasMicrosoftTokens) {
+      return res.status(401).json({
+        error: 'Authentication failed',
+        message: 'Please reconnect your Google account to send emails.',
+      });
     }
 
     // Prepare email data
@@ -1387,7 +1404,7 @@ router.get('/message/:messageId', async (req, res) => {
 
   try {
     const message = await prisma.message.findUnique({
-      where: { id: messageId }
+      where: { id: messageId },include: {investor: true}
     });
 
     if (!message) {
@@ -1459,7 +1476,7 @@ router.post('/message/schedule', async (req, res) => {
         subject,
         from,
         body,
-        status: 'SCHEDULED',
+        status: 'DRAFT',
         scheduledFor: scheduledDate,
         threadId: inheritedThreadId,
         gmailReferences: inheritedReferences,
@@ -1496,10 +1513,6 @@ router.post('/message/:messageId/schedule', async (req, res) => {
 
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
-    }
-
-    if (message.status !== 'SCHEDULED') {
-      return res.status(400).json({ error: 'Message is not in a schedulable state' });
     }
 
     if (message.jobId) {
@@ -1557,7 +1570,7 @@ router.get('/messages/scheduled/:userId', async (req, res) => {
 
     const scheduledMessages = await prisma.message.findMany({
       where: { userId, status: 'SCHEDULED' },
-      orderBy: { scheduledFor: 'asc' },
+      orderBy: { updatedAt: 'desc' }
     });
     
 
@@ -1569,137 +1582,6 @@ router.get('/messages/scheduled/:userId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching scheduled messages:', error);
     res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-export default router;
-// Send a scheduled email immediately (send as reply in existing thread)
-router.post('/message/:messageId/send-reply', upload.any(), async (req, res) => {
-  const { messageId } = req.params;
-  try {
-    const message = await prisma.message.findUnique({
-      where: { id: messageId },
-      include: {
-        user: true,
-        previousMessage: { select: previousMessageSelect },
-      },
-    });
-
-    if (!message) return res.status(404).json({ error: 'Message not found' });
-    if (message.status !== 'SCHEDULED') {
-      return res.status(400).json({ error: 'Message is not scheduled' });
-    }
-
-    // Prepare threading only from linked previous message (no fallback, no mutations)
-    const prev = message.previousMessage ?? (message.previousMessageId
-      ? await prisma.message.findUnique({ where: { id: message.previousMessageId }, select: previousMessageSelect })
-      : null);
-    const mergedRefs = mergeReferences(prev?.gmailReferences, prev?.gmailMessageId);
-    const replyThreadId = prev?.threadId || message.threadId || null;
-
-    // Determine provider tokens
-    let googleTokens: any;
-    let microsoftTokens: any;
-    try {
-      googleTokens = await clerkClient.users.getUserOauthAccessToken(message.userId, 'oauth_google');
-    } catch {}
-    if (!googleTokens?.data?.length) {
-      try {
-        microsoftTokens = await clerkClient.users.getUserOauthAccessToken(message.userId, 'oauth_microsoft');
-      } catch {}
-    }
-
-    // Collect any attachments from request metadata (optional)
-    const emailAttachments: Array<{ filename: string; type: string; size: number; url: string }> = [];
-    const raw = (req.body && (req.body.attachments ?? req.body.attachmentMetadata)) || null;
-    const arr = Array.isArray(raw) ? raw : raw ? [raw] : [];
-    for (const meta of arr) {
-      if (!meta) continue;
-      const filename = meta.filename || meta.name || 'attachment';
-      const type = meta.type || meta.contentType || 'application/octet-stream';
-      const size = Number(meta.size) || 0;
-      const url = meta.url;
-      if (url) emailAttachments.push({ filename, type, size, url });
-    }
-
-    let providerResult: { threadId: string | null; messageId: string | null } = { threadId: replyThreadId, messageId: null };
-    if (googleTokens?.data?.length) {
-      providerResult = await sendViaGmail(googleTokens.data[0].token, message, emailAttachments, replyThreadId, mergedRefs);
-    } else if (microsoftTokens?.data?.length) {
-      providerResult = await sendViaMicrosoftGraph(microsoftTokens.data[0].token, message, emailAttachments, replyThreadId, mergedRefs);
-    } else {
-      const fallbackMessage = {
-        ...message,
-        threadId: replyThreadId ?? message.threadId,
-        gmailReferences: mergedRefs ?? message.gmailReferences,
-      };
-
-      providerResult = await sendViaSendgridFallback(fallbackMessage, emailAttachments, mergedRefs);
-      console.log('Email sent via SendGrid fallback');
-    }
-
-    const updatedMessage = await prisma.message.update({
-      where: { id: message.id },
-      data: {
-        status: 'SENT',
-        scheduledFor: null,
-        jobId: null,
-      },
-    });
-
-    // Cancel the delayed job only after a successful send
-    if (message.jobId) {
-      try {
-        await cancelScheduledEmail(message.jobId);
-      } catch (e) {
-        console.warn('Failed to cancel scheduled job after send:', e);
-      }
-    }
-
-    res.json({ message: 'Scheduled email sent as reply successfully!', data: updatedMessage });
-  } catch (error: any) {
-    console.error('Error sending scheduled email reply:', error);
-    // Mirror send() error response style
-    let errorMessage = 'Failed to send email. Please try again.';
-    let statusCode = 500;
-
-    if (error?.code === 'LIMIT_FILE_SIZE') {
-      errorMessage = 'File size too large. Please select files smaller than 75MB.';
-      statusCode = 413;
-    } else if (error?.code === 'LIMIT_FILE_COUNT') {
-      errorMessage = 'Too many files attached. Please reduce the number of attachments.';
-      statusCode = 413;
-    } else if (error?.code === 'LIMIT_UNEXPECTED_FILE') {
-      errorMessage = 'Invalid file type detected. Please check your attachments.';
-      statusCode = 400;
-    } else if (error?.response?.status === 413) {
-      errorMessage = 'Request too large. Please reduce file sizes and try again.';
-      statusCode = 413;
-    } else if (error?.message?.includes('network') || error?.message?.includes('timeout')) {
-      errorMessage = 'Network error occurred. Please check your connection and try again.';
-      statusCode = 503;
-    } else if (error?.message?.includes('authentication') || error?.message?.includes('unauthorized')) {
-      errorMessage = 'Authentication failed. Please reconnect your account from settings page';
-      statusCode = 401;
-    } else if (error?.response?.body?.errors) {
-      const providerErrors = error.response.body.errors;
-      if (Array.isArray(providerErrors) && providerErrors.length > 0) {
-        const firstError = providerErrors[0];
-        const providerMessage = typeof firstError === 'string' ? firstError : firstError?.message;
-        if (providerMessage) {
-          errorMessage = `Email sending failed: ${providerMessage}`;
-        }
-      }
-    }
-
-    // IMPORTANT: do NOT change message status/job/schedule on failure (keep SCHEDULED)
-    return res.status(statusCode).json({
-      error: 'Failed to send email',
-      message: errorMessage,
-      details: error?.response?.body?.errors || error?.message,
-      statusCode: error?.code,
-      fullError: error?.response?.data
-    });
   }
 });
 
@@ -1726,3 +1608,5 @@ router.post('/message/:messageId/cancel', async (req, res) => {
     res.status(500).json({ error: 'Failed to cancel scheduled message', details: error?.message });
   }
 });
+
+export default router;
