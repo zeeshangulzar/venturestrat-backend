@@ -1374,7 +1374,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       errorMessage = 'Network error occurred. Please check your connection and try again.';
       statusCode = 503;
     } else if (error.message?.includes('authentication') || error.message?.includes('unauthorized')) {
-      errorMessage = 'Authentication failed. Please reconnect your account from settings page';
+      errorMessage = 'Authentication failed. Please reconnect your account';
       statusCode = 401;
     } else if (error.response?.body?.errors) {
       // Provider specific errors
