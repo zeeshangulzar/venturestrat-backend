@@ -3,6 +3,8 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { uploadPublicFile, getSignedUrlForAsset } from '../services/storage.js';
+import { clerkClient } from '@clerk/clerk-sdk-node';
+import { google } from 'googleapis';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -38,6 +40,79 @@ router.post('/createOrFindUser', async (req, res) => {
   } catch (error) {
     console.error('Error creating or finding user:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /user/:userId/status - token/scope status for integrations
+router.get('/user/:userId/status', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const normalizeExpiry = (value?: number | null) => {
+      if (!value) return null;
+      const ms = value > 1e12 ? value : value * 1000;
+      return ms;
+    };
+
+    const response = {
+      google: { hasToken: false, expiresAt: null as number | null, isExpired: false },
+      microsoft: { hasToken: false, expiresAt: null as number | null, isExpired: false },
+    };
+
+    try {
+      const googleTokens = await clerkClient.users.getUserOauthAccessToken(userId, 'oauth_google');
+      const googleTokenData = googleTokens?.data?.[0];
+      const googleExpiryMs = normalizeExpiry(
+        (googleTokenData as any)?.expires_at ?? (googleTokenData as any)?.expiresAt ?? null
+      );
+      const googleHasToken = Boolean(googleTokenData?.token);
+      let googleIsExpired = !googleHasToken || Boolean(googleExpiryMs && Date.now() >= googleExpiryMs);
+
+      // Validate token with Google if present
+      if (googleHasToken && !googleIsExpired) {
+        try {
+          const oauth2 = new google.auth.OAuth2();
+          await oauth2.getTokenInfo(googleTokenData!.token as string);
+        } catch (tokenErr) {
+          console.warn('Google token appears invalid on validation:', tokenErr);
+          googleIsExpired = true;
+        }
+      }
+
+      response.google = {
+        hasToken: googleHasToken,
+        expiresAt: googleExpiryMs,
+        isExpired: googleIsExpired,
+      };
+    } catch (err) {
+      console.warn('Failed to fetch Google token for status route:', err);
+      response.google = { hasToken: false, expiresAt: Date.now() - 1000, isExpired: true };
+    }
+
+    try {
+      const microsoftTokens = await clerkClient.users.getUserOauthAccessToken(userId, 'oauth_microsoft');
+      const microsoftTokenData = microsoftTokens?.data?.[0];
+      const microsoftExpiryMs = normalizeExpiry(
+        (microsoftTokenData as any)?.expires_at ?? (microsoftTokenData as any)?.expiresAt ?? null
+      );
+      const microsoftHasToken = Boolean(microsoftTokenData?.token);
+      const microsoftIsExpired = !microsoftHasToken || Boolean(microsoftExpiryMs && Date.now() >= microsoftExpiryMs);
+      response.microsoft = {
+        hasToken: microsoftHasToken,
+        expiresAt: microsoftExpiryMs,
+        isExpired: microsoftIsExpired,
+      };
+    } catch (err) {
+      console.warn('Failed to fetch Microsoft token for status route:', err);
+      response.microsoft = { hasToken: false, expiresAt: Date.now() - 1000, isExpired: true };
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error('Error fetching user integration status:', error);
+    res.json({
+      google: { hasToken: false, expiresAt: null, isExpired: false },
+      microsoft: { hasToken: false, expiresAt: null, isExpired: false },
+    });
   }
 });
 
