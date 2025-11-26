@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import { uploadPublicFile, getSignedUrlForAsset } from '../services/storage.js';
+import sharp from 'sharp';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { google } from 'googleapis';
 
@@ -276,10 +277,25 @@ router.post('/user/upload-logo', upload.single('logo'), async (req, res) => {
       return res.status(400).json({ error: 'File must be an image' });
     }
 
+    let uploadBuffer = file.buffer;
+    let uploadMime = file.mimetype;
+    let uploadName = file.originalname;
+
+    // Convert SVG to PNG to improve email client compatibility
+    if (file.mimetype === 'image/svg+xml') {
+      try {
+        uploadBuffer = await sharp(file.buffer).png().toBuffer();
+        uploadMime = 'image/png';
+        uploadName = file.originalname.replace(/\.\w+$/, '') + '.png';
+      } catch (err) {
+        console.warn('Failed to convert SVG to PNG, uploading original SVG:', err);
+      }
+    }
+
     // Upload to B2
-    const fileKey = `logos/logo-${Date.now()}-${file.originalname}`;
+    const fileKey = `logos/logo-${Date.now()}-${uploadName}`;
     
-    await uploadPublicFile(file.buffer, fileKey, file.mimetype);
+    await uploadPublicFile(uploadBuffer, fileKey, uploadMime);
     const logoUrl = await getSignedUrlForAsset(fileKey);
 
     // Update user with new logo URL
