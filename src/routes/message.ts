@@ -874,17 +874,9 @@ router.post('/message', async (req, res) => {
         where: { userId, investorId, status: 'DRAFT' }
       });
 
-      if (existing) {
-        message = await prisma.message.update({
-          where: { id: existing.id },
-          data: { to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body 
-          }
-        });
-      } else {
-        message = await prisma.message.create({
-          data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body, status: 'DRAFT' }
-        });
-      }
+      message = await prisma.message.create({
+        data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body, status: 'DRAFT' }
+      });
     } else {
       // Always create new for SENT or FAILED
       const enumStatus = (['DRAFT','SENT','FAILED','ANSWERED','SCHEDULED'] as const).includes(status as any)
