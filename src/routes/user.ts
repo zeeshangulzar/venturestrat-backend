@@ -170,6 +170,14 @@ router.put('/user/:userId', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const mergedPublicMeta =
+      publicMetaData !== undefined
+        ? {
+            ...(existingUser.publicMetaData as any),
+            ...(publicMetaData as any),
+          }
+        : undefined;
+
     // Update user with provided fields
     const updatedUser = await prisma.user.update({
       where: { id: userId },
@@ -178,7 +186,7 @@ router.put('/user/:userId', async (req, res) => {
         ...(lastname !== undefined && { lastname }),
         ...(role !== undefined && { role }),
         ...(onboardingComplete !== undefined && { onboardingComplete }),
-        ...(publicMetaData !== undefined && { publicMetaData }),
+        ...(mergedPublicMeta !== undefined && { publicMetaData: mergedPublicMeta }),
         ...(companyWebsite !== undefined && { companyWebsite }),
         ...(companyLogo !== undefined && { companyLogo }),
       },
