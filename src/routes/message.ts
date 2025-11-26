@@ -760,10 +760,10 @@ export function generateEmailHTML(body: string, googleFonts: string[]): string {
   
   html += `
     </head>
-    <body style="margin:0; padding:0; background-color:#ffffff; font-family: Arial, Helvetica, sans-serif;">
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#ffffff;">
+    <body style="margin:0; padding:0>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
         <tr>
-          <td align="left" style="padding:24px; color:#0f172a; font-size:16px; line-height:1.6;">
+          <td align="left" style="padding:24px; font-size:16px; line-height:1.6;">
             ${body}
           </td>
         </tr>
