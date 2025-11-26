@@ -80,7 +80,7 @@ const upload = multer({
   },
 });
 
-const buildSenderDisplayName = (user: any, fallback: string) => {
+export const buildSenderDisplayName = (user: any, fallback: string) => {
   if (!user) return fallback;
   const first = typeof user.firstname === 'string' ? user.firstname.trim() : '';
   const last = typeof user.lastname === 'string' ? user.lastname.trim() : '';
