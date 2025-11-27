@@ -38,16 +38,12 @@ export async function scrapeWebsiteLogo(websiteUrl: string): Promise<LogoScrapin
     if (!html || typeof html !== 'string' || html.trim().length < 20) {
       return { success: false, error: 'Could not load HTML from Firecrawl' };
     }
-
-    const cleanedHtml = html
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/\s+/g, ' ')
+    
     
     // ------------------------
     // 2) AI EXTRACTS LOGO
     // ------------------------
-    const aiPick = await pickLogoFromHtml(cleanedHtml, baseUrl, domainName);
+    const aiPick = await pickLogoFromHtml(html, baseUrl, domainName);
     console.log('🤖 AI logo pick result:', aiPick);
 
     if (!aiPick?.url) {
@@ -176,14 +172,9 @@ async function pickLogoFromHtml(html: string, baseUrl: string, domainName: strin
             → Convert to absolute using baseUrl.
 
           7. The returned "url" MUST NOT equal the baseUrl or any non-image link.
-          8. If the extracted logo comes from <img src="..."> and the src is a RELATIVE path
-            (starts with "/" or "./" or "../"), you MUST convert it into a FULL ABSOLUTE URL
-            using the provided baseUrl, exactly like: new URL(src, baseUrl).href
+          8. If the src is fully qualified (starts with http), you MUST return it 100% verbatim.
 
-            Example:
-              baseUrl: http://abc.com
-              src: /templets/default/images/logo.png
-              return: http://abc.com/templets/default/images/logo.png
+          9 If the src begins with "/", "./", or "../", return EXACTLY that path, and THEN convert to absolute using baseUrl WITHOUT altering the path.
 
             Never invent or guess folder names such as /assets/, /static/, /images/ unless they exist in the HTML.
 
