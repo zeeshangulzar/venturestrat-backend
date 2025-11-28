@@ -15,16 +15,31 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
 import { ExpressAdapter } from '@bull-board/express';
 import { emailQueue, queueEvents } from './services/emailQueue.js';
 // import verifyUser from 'middleware/verifyUser';
+dotenv.config();
 
 const prisma = new PrismaClient();
-dotenv.config();
+const allowedOrigins = [
+  process.env.FRONTEND_URL_PROD,
+  process.env.FRONTEND_URL_LOCAL,
+].filter(Boolean);
+console.log('Allowed origins:', allowedOrigins);
 const app = express();
 const port = process.env.PORT || 3001;
 
 // Start the email worker
 console.log('📧 Email worker started');
 
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"), false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  })
+);
 app.use(express.json());
 
 // Configure multer for handling file uploads
