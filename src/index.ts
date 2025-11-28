@@ -28,6 +28,11 @@ const port = process.env.PORT || 3001;
 
 // Start the email worker
 console.log('📧 Email worker started');
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.removeHeader("X-Powered-By");
+  next();
+});
 
 app.use(
   cors({
