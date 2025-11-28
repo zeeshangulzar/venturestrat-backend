@@ -52,6 +52,18 @@ app.use(
 );
 app.use(express.json());
 
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, max-age=0, private"
+    );
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+  next();
+});
+
 // Configure multer for handling file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
