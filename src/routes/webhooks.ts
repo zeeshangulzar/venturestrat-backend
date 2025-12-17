@@ -1,10 +1,11 @@
 // src/routes/webhooks.ts
 import { Router } from 'express';
-import { PrismaClient, MessageStatus } from '@prisma/client';
+import { PrismaClient, MessageStatus, SubscriptionPlan } from '@prisma/client';
 import { Webhook } from 'svix';
 import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { cancelScheduledEmail } from '../services/emailQueue.js';
+import { stripeService } from '../services/stripeService.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -760,11 +761,12 @@ router.post('/webhooks/clerk', async (req, res) => {
                 firstname: first_name || null,
                 lastname: last_name || null,
                 publicMetaData: public_metadata || null,
+                subscriptionPlan: SubscriptionPlan.FREE,
               },
             });
             console.log(`User updated with id in database: ${id}`);
-          }else {
-            await prisma.user.create({
+          } else {
+            const createdUser = await prisma.user.create({
               data: {
                 id: id,
                 email: email,
@@ -773,9 +775,46 @@ router.post('/webhooks/clerk', async (req, res) => {
                 role: "moderator", // Default role
                 onboardingComplete: false, // Default onboarding status
                 publicMetaData: public_metadata || null,
+                subscriptionPlan: SubscriptionPlan.FREE,
               },
             });
             console.log(`User created in database: ${id} (${email}) with role: moderator`);
+
+            if (stripeService.isEnabled()) {
+              try {
+                const customerId = await stripeService.ensureCustomer({
+                  userId: createdUser.id,
+                  email: createdUser.email,
+                  name: [createdUser.firstname, createdUser.lastname].filter(Boolean).join(' ') || null,
+                });
+
+                const subscription = await stripeService.createSubscription({
+                  userId: createdUser.id,
+                  customerId,
+                  plan: 'FREE',
+                });
+
+                await prisma.user.update({
+                  where: { id: createdUser.id },
+                  data: {
+                    stripeCustomerId: customerId,
+                    stripeSubscriptionId: subscription.id,
+                    subscriptionPlan: SubscriptionPlan.FREE,
+                    subscriptionStatus: subscription.status,
+                    subscriptionCurrentPeriodEnd: subscription.current_period_end
+                      ? new Date(subscription.current_period_end * 1000)
+                      : null,
+                  },
+                });
+
+                console.log(`Stripe customer ${customerId} and subscription ${subscription.id} created for user ${createdUser.id}`);
+              } catch (stripeError) {
+                console.error(`Failed to provision Stripe customer/subscription for user ${createdUser.id}:`, stripeError);
+              }
+            } else {
+              console.warn(`Stripe is not configured. Skipping subscription provisioning for user ${createdUser.id}`);
+            }
+            console.log(`User created in the database: updated${id}`);
           }
         }
         break;

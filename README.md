@@ -45,6 +45,12 @@ PORT=3001
 # Clerk Configuration
 CLERK_WEBHOOK_SECRET=whsec_your_webhook_secret_here
 CLERK_SECRET_KEY=sk_test_your_secret_key_here
+
+# Stripe Configuration
+STRIPE_SECRET_KEY=sk_live_or_test_key_from_stripe
+STRIPE_FREE_PRICE_ID=price_id_for_free_plan
+STRIPE_PRO_PRICE_ID=price_id_for_premium_plan
+STRIPE_SCALE_PRICE_ID=price_id_for_exclusive_plan
 ```
 
 ### 4. Setup Clerk Webhooks
@@ -114,6 +120,9 @@ src/
 - `GET /api/user/:userId` - Get user details by ID with shortlisted investors
 - `PUT /api/user/:userId` - Update user information
 - `POST /api/createOrFindUser` - Create or find existing user
+- `GET /api/user/:userId/subscription` - Retrieve Stripe subscription metadata
+- `POST /api/user/:userId/subscription` - Change the active subscription plan (requires plan + optional payment method ID)
+- `POST /api/user/:userId/subscription/intent` - Create a Stripe Setup Intent to collect a payment method
 
 ### Shortlist Management  
 - `POST /api/shortlist` - Add investor to user's shortlist
@@ -129,6 +138,7 @@ src/
 - Clerk webhooks automatically sync user creation/deletion between Clerk and your local database.
 - Webhook signatures are verified using Svix for security.
 - Users now include firstname, lastname, and publicMetaData fields from Clerk.
+- Stripe customers and subscriptions are provisioned automatically on signup; set the Stripe environment variables before onboarding users.
 
 ---
 

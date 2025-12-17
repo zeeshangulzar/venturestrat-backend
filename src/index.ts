@@ -14,6 +14,7 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter.js';
 import { ExpressAdapter } from '@bull-board/express';
 import { emailQueue, queueEvents } from './services/emailQueue.js';
+import subscriptionRoutes from './routes/subscription.js'
 // import verifyUser from 'middleware/verifyUser';
 dotenv.config();
 
@@ -78,6 +79,7 @@ app.use('/api', shortlistRoutes);
 app.use('/api', webhookRoutes);
 app.use('/api', messageRoutes);
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api', subscriptionRoutes);
 
 // Bull Board for monitoring BullMQ jobs (scheduled emails, processing state, etc.)
 const bullBoardAdapter = new ExpressAdapter();

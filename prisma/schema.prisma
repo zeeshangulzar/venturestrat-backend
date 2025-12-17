@@ -28,6 +28,13 @@ enum MessageStatus {
 
 // Removed ShortlistStatus enum to allow dynamic status values
 
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PRO
+  SCALE
+}
+
 /* =========================
    Core Models
    ========================= */
@@ -43,8 +50,15 @@ model User {
   companyWebsite     String?     // Company website URL
   companyLogo        String?     // B2 URL to company logo
   createdAt          DateTime    @default(now())
+  stripeCustomerId   String?     @unique
+  stripeSubscriptionId String?   @unique
+  stripePaymentMethodId String?  @unique
+  subscriptionPlan   SubscriptionPlan @default(FREE)
+  subscriptionStatus String?
+  subscriptionCurrentPeriodEnd DateTime?
   shortlists         Shortlist[]
   messages           Message[]
+  usageTracking      UsageTracking[]
 }
 
 model Investor {
@@ -207,4 +221,32 @@ model Message {
   updatedAt  DateTime      @updatedAt
 
   @@index([previousMessageId])
+}
+
+model UsageTracking {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Daily usage tracking
+  date       DateTime @default(now())
+  aiDraftsUsed Int    @default(0)
+  emailsSent  Int     @default(0)
+  investorsAdded Int  @default(0)
+  
+  // Monthly usage tracking (for premium/exclusive plans)
+  month      Int      // 1-12
+  year       Int      // e.g., 2024
+  monthlyEmailsSent Int @default(0)
+  monthlyInvestorsAdded Int @default(0)
+  monthlyFollowUpEmailsSent Int @default(0)
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+  @@index([month, year])
+  @@map("usage_tracking")
 }
