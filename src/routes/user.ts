@@ -5,6 +5,9 @@ import multer from 'multer';
 import type Stripe from 'stripe';
 import { stripeService } from '../services/stripeService.js';
 import { uploadPublicFile, getSignedUrlForAsset } from '../services/storage.js';
+import sharp from 'sharp';
+import { clerkClient } from '@clerk/clerk-sdk-node';
+import { google } from 'googleapis';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -68,6 +71,79 @@ router.post('/createOrFindUser', async (req, res) => {
   }
 });
 
+// GET /user/:userId/status - token/scope status for integrations
+router.get('/user/:userId/status', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const normalizeExpiry = (value?: number | null) => {
+      if (!value) return null;
+      const ms = value > 1e12 ? value : value * 1000;
+      return ms;
+    };
+
+    const response = {
+      google: { hasToken: false, expiresAt: null as number | null, isExpired: false },
+      microsoft: { hasToken: false, expiresAt: null as number | null, isExpired: false },
+    };
+
+    try {
+      const googleTokens = await clerkClient.users.getUserOauthAccessToken(userId, 'oauth_google');
+      const googleTokenData = googleTokens?.data?.[0];
+      const googleExpiryMs = normalizeExpiry(
+        (googleTokenData as any)?.expires_at ?? (googleTokenData as any)?.expiresAt ?? null
+      );
+      const googleHasToken = Boolean(googleTokenData?.token);
+      let googleIsExpired = !googleHasToken || Boolean(googleExpiryMs && Date.now() >= googleExpiryMs);
+
+      // Validate token with Google if present
+      if (googleHasToken && !googleIsExpired) {
+        try {
+          const oauth2 = new google.auth.OAuth2();
+          await oauth2.getTokenInfo(googleTokenData!.token as string);
+        } catch (tokenErr) {
+          console.warn('Google token appears invalid on validation:', tokenErr);
+          googleIsExpired = true;
+        }
+      }
+
+      response.google = {
+        hasToken: googleHasToken,
+        expiresAt: googleExpiryMs,
+        isExpired: googleIsExpired,
+      };
+    } catch (err) {
+      console.warn('Failed to fetch Google token for status route:', err);
+      response.google = { hasToken: false, expiresAt: Date.now() - 1000, isExpired: true };
+    }
+
+    try {
+      const microsoftTokens = await clerkClient.users.getUserOauthAccessToken(userId, 'oauth_microsoft');
+      const microsoftTokenData = microsoftTokens?.data?.[0];
+      const microsoftExpiryMs = normalizeExpiry(
+        (microsoftTokenData as any)?.expires_at ?? (microsoftTokenData as any)?.expiresAt ?? null
+      );
+      const microsoftHasToken = Boolean(microsoftTokenData?.token);
+      const microsoftIsExpired = !microsoftHasToken || Boolean(microsoftExpiryMs && Date.now() >= microsoftExpiryMs);
+      response.microsoft = {
+        hasToken: microsoftHasToken,
+        expiresAt: microsoftExpiryMs,
+        isExpired: microsoftIsExpired,
+      };
+    } catch (err) {
+      console.warn('Failed to fetch Microsoft token for status route:', err);
+      response.microsoft = { hasToken: false, expiresAt: Date.now() - 1000, isExpired: true };
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error('Error fetching user integration status:', error);
+    res.json({
+      google: { hasToken: false, expiresAt: null, isExpired: false },
+      microsoft: { hasToken: false, expiresAt: null, isExpired: false },
+    });
+  }
+});
+
 // GET /users - Get all users
 router.get('/users', async (req, res) => {
   try {
@@ -121,6 +197,14 @@ router.put('/user/:userId', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const mergedPublicMeta =
+      publicMetaData !== undefined
+        ? {
+            ...(existingUser.publicMetaData as any),
+            ...(publicMetaData as any),
+          }
+        : undefined;
+
     // Update user with provided fields
     const updatedUser = await prisma.user.update({
       where: { id: userId },
@@ -129,7 +213,7 @@ router.put('/user/:userId', async (req, res) => {
         ...(lastname !== undefined && { lastname }),
         ...(role !== undefined && { role }),
         ...(onboardingComplete !== undefined && { onboardingComplete }),
-        ...(publicMetaData !== undefined && { publicMetaData }),
+        ...(mergedPublicMeta !== undefined && { publicMetaData: mergedPublicMeta }),
         ...(companyWebsite !== undefined && { companyWebsite }),
         ...(companyLogo !== undefined && { companyLogo }),
       },
@@ -240,10 +324,25 @@ router.post('/user/upload-logo', upload.single('logo'), async (req, res) => {
       return res.status(400).json({ error: 'File must be an image' });
     }
 
+    let uploadBuffer = file.buffer;
+    let uploadMime = file.mimetype;
+    let uploadName = file.originalname;
+
+    // Convert SVG to PNG to improve email client compatibility
+    if (file.mimetype === 'image/svg+xml') {
+      try {
+        uploadBuffer = await sharp(file.buffer).png().toBuffer();
+        uploadMime = 'image/png';
+        uploadName = file.originalname.replace(/\.\w+$/, '') + '.png';
+      } catch (err) {
+        console.warn('Failed to convert SVG to PNG, uploading original SVG:', err);
+      }
+    }
+
     // Upload to B2
-    const fileKey = `logos/logo-${Date.now()}-${file.originalname}`;
+    const fileKey = `logos/logo-${Date.now()}-${uploadName}`;
     
-    await uploadPublicFile(file.buffer, fileKey, file.mimetype);
+    await uploadPublicFile(uploadBuffer, fileKey, uploadMime);
     const logoUrl = await getSignedUrlForAsset(fileKey);
 
     // Update user with new logo URL

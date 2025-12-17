@@ -16,17 +16,54 @@ import { ExpressAdapter } from '@bull-board/express';
 import { emailQueue, queueEvents } from './services/emailQueue.js';
 import subscriptionRoutes from './routes/subscription.js'
 // import verifyUser from 'middleware/verifyUser';
+dotenv.config();
 
 const prisma = new PrismaClient();
-dotenv.config();
+const allowedOrigins = [
+  process.env.FRONTEND_URL_PROD,
+  process.env.FRONTEND_URL_LOCAL,
+].filter(Boolean);
+console.log('Allowed origins:', allowedOrigins);
 const app = express();
 const port = process.env.PORT || 3001;
 
 // Start the email worker
 console.log('📧 Email worker started');
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.removeHeader("X-Powered-By");
+  next();
+});
 
-app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  next();
+});
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"), false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  })
+);
 app.use(express.json());
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    res.setHeader(
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate, max-age=0, private"
+    );
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+  next();
+});
 
 // Configure multer for handling file uploads
 const upload = multer({

@@ -82,7 +82,7 @@ const upload = multer({
   },
 });
 
-const buildSenderDisplayName = (user: any, fallback: string) => {
+export const buildSenderDisplayName = (user: any, fallback: string) => {
   if (!user) return fallback;
   const first = typeof user.firstname === 'string' ? user.firstname.trim() : '';
   const last = typeof user.lastname === 'string' ? user.lastname.trim() : '';
@@ -364,10 +364,6 @@ async function sendViaGmail(accessToken: string, message: any, attachmentLinks: 
   ];
 
   const rawMessage = [...headerLines, ...emailContent].join("\r\n");
-  
-  console.log('Gmail email content with attachments:', cleanedBody);
-  console.log('Gmail attachment links:', attachmentLinks);
-
   const encodedMessage = Buffer.from(rawMessage)
     .toString("base64")
     .replace(/\+/g, "-")
@@ -761,10 +757,10 @@ export function generateEmailHTML(body: string, googleFonts: string[]): string {
   
   html += `
     </head>
-    <body style="margin:0; padding:0; background-color:#ffffff; font-family: Arial, Helvetica, sans-serif;">
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse; background-color:#ffffff;">
+    <body style="margin:0; padding:0>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
         <tr>
-          <td align="left" style="padding:24px; color:#0f172a; font-size:16px; line-height:1.6;">
+          <td align="left" style="padding:24px; font-size:16px; line-height:1.6;">
             ${body}
           </td>
         </tr>
@@ -872,17 +868,9 @@ router.post('/message', async (req, res) => {
         where: { userId, investorId, status: 'DRAFT' }
       });
 
-      if (existing) {
-        message = await prisma.message.update({
-          where: { id: existing.id },
-          data: { to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body 
-          }
-        });
-      } else {
-        message = await prisma.message.create({
-          data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body, status: 'DRAFT' }
-        });
-      }
+      message = await prisma.message.create({
+        data: { userId, investorId, to, cc: Array.isArray(cc) ? cc : (cc ? cc.split(',').map((email: string) => email.trim()) : []), subject, from, body, status: 'DRAFT' }
+      });
     } else {
       // Always create new for SENT or FAILED
       const enumStatus = (['DRAFT','SENT','FAILED','ANSWERED','SCHEDULED'] as const).includes(status as any)
@@ -1203,7 +1191,18 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       return res.status(400).json({ error: 'Message has already been sent' });
     }
 
-    // Check for Google OAuth tokens first
+    // Check external accounts & tokens (prefer Gmail; avoid falling back if connected but missing tokens)
+    let hasGoogleAccount = false;
+    let hasMicrosoftAccount = false;
+    try {
+      const clerkUser = await clerkClient.users.getUser(message.userId);
+      const accounts = clerkUser?.externalAccounts || [];
+      hasGoogleAccount = accounts.some((acc: any) => acc.provider?.includes('google'));
+      hasMicrosoftAccount = accounts.some((acc: any) => acc.provider?.includes('microsoft'));
+    } catch (error) {
+      console.warn('Failed to read Clerk external accounts:', error);
+    }
+
     let googleTokens;
     try {
       googleTokens = await clerkClient.users.getUserOauthAccessToken(
@@ -1214,7 +1213,6 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       console.log('No Google OAuth tokens found, checking Microsoft...');
     }
 
-    // Check for Microsoft OAuth tokens if no Google tokens
     let microsoftTokens;
     if (!googleTokens?.data || googleTokens.data.length === 0) {
       try {
@@ -1223,8 +1221,19 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
           "oauth_microsoft"
         );
       } catch (error) {
-      console.log('No Microsoft OAuth tokens found either, will use Nodemailer fallback...');
+        console.log('No Microsoft OAuth tokens found either, will use Nodemailer fallback...');
       }
+    }
+
+    const hasGoogleTokens = !!(googleTokens?.data && googleTokens.data.length > 0);
+    const hasMicrosoftTokens = !!(microsoftTokens?.data && microsoftTokens.data.length > 0);
+
+    // If the user connected Gmail but we cannot retrieve tokens, force reconnect instead of falling back to SendGrid
+    if (hasGoogleAccount && !hasGoogleTokens && !hasMicrosoftTokens) {
+      return res.status(401).json({
+        error: 'Authentication failed',
+        message: 'Please reconnect your Google account to send emails.',
+      });
     }
 
     // Prepare email data
@@ -1357,7 +1366,7 @@ router.post('/message/:messageId/send', upload.any(), async (req, res) => {
       errorMessage = 'Network error occurred. Please check your connection and try again.';
       statusCode = 503;
     } else if (error.message?.includes('authentication') || error.message?.includes('unauthorized')) {
-      errorMessage = 'Authentication failed. Please reconnect your account from settings page';
+      errorMessage = 'Authentication failed. Please reconnect your account';
       statusCode = 401;
     } else if (error.response?.body?.errors) {
       // Provider specific errors
@@ -1387,7 +1396,7 @@ router.get('/message/:messageId', async (req, res) => {
 
   try {
     const message = await prisma.message.findUnique({
-      where: { id: messageId }
+      where: { id: messageId },include: {investor: true}
     });
 
     if (!message) {
@@ -1459,7 +1468,7 @@ router.post('/message/schedule', async (req, res) => {
         subject,
         from,
         body,
-        status: 'SCHEDULED',
+        status: 'DRAFT',
         scheduledFor: scheduledDate,
         threadId: inheritedThreadId,
         gmailReferences: inheritedReferences,
@@ -1498,10 +1507,6 @@ router.post('/message/:messageId/schedule', async (req, res) => {
 
     if (!message) {
       return res.status(404).json({ error: 'Message not found' });
-    }
-
-    if (message.status !== 'SCHEDULED') {
-      return res.status(400).json({ error: 'Message is not in a schedulable state' });
     }
 
     if (message.jobId) {
@@ -1559,7 +1564,7 @@ router.get('/messages/scheduled/:userId', async (req, res) => {
 
     const scheduledMessages = await prisma.message.findMany({
       where: { userId, status: 'SCHEDULED' },
-      orderBy: { scheduledFor: 'asc' },
+      orderBy: { updatedAt: 'desc' }
     });
     
 
@@ -1597,3 +1602,5 @@ router.post('/message/:messageId/cancel', async (req, res) => {
     res.status(500).json({ error: 'Failed to cancel scheduled message', details: error?.message });
   }
 });
+
+export default router;

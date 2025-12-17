@@ -4,6 +4,7 @@ import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { cleanEmailBody, sendViaSendgridFallback } from '../routes/message.js';
 import { validateSubscriptionUsage } from '../middleware/subscriptionValidation.js';
+import { buildSenderDisplayName } from '../routes/message.js';
 
 const prisma = new PrismaClient();
 
@@ -76,19 +77,19 @@ const emailWorker = new Worker(
   async (job: Job) => {
     console.log(`Processing scheduled email job ${job.id}`);
     
-    const {
-      messageId,
-      userId,
-      investorId,
-      to,
-      cc,
-      subject,
-      from,
-      body,
-      attachments,
-      threadId,
-      previousMessageId,
-    } = job.data;
+  const {
+    messageId,
+    userId,
+    investorId,
+    to,
+    cc,
+    subject,
+    from,
+    body,
+    attachments,
+    threadId,
+    previousMessageId,
+  } = job.data;
 
     try {
       // Get the message to update
@@ -131,6 +132,17 @@ const emailWorker = new Worker(
         gmailReferences: referencesFromPrev ?? null,
       } as typeof message;
 
+      const attachmentLinks = Array.isArray(attachments)
+        ? attachments
+            .map((att: any) => ({
+              filename: att?.filename || att?.name || 'attachment',
+              type: att?.type || att?.contentType || 'application/octet-stream',
+              size: Number(att?.size) || 0,
+              url: att?.url ?? null,
+            }))
+            .filter((att) => !!att.url)
+        : [];
+
       // Get OAuth tokens
       let googleTokens;
       let microsoftTokens;
@@ -165,30 +177,23 @@ const emailWorker = new Worker(
         sendResult = await sendViaGmail(
           googleTokens.data[0].token,
           messageContext,
-          effectiveThreadId
+          attachmentLinks,
+          effectiveThreadId,
+          referencesFromPrev
         );
       } else if (microsoftTokens?.data && microsoftTokens.data.length > 0) {
         sendResult = await sendViaMicrosoftGraph(
           microsoftTokens.data[0].token,
           messageContext,
-          effectiveThreadId
+          attachmentLinks,
+          effectiveThreadId,
+          referencesFromPrev
         );
       } else {
         const mergedReferences = mergeReferences(
           referencesFromPrev,
           messageContext.gmailReferences,
         );
-
-        const attachmentLinks = Array.isArray(attachments)
-          ? attachments
-              .map((att: any) => ({
-                filename: att?.filename || att?.name || 'attachment',
-                type: att?.type || att?.contentType || 'application/octet-stream',
-                size: Number(att?.size) || 0,
-                url: att?.url ?? null,
-              }))
-              .filter((att) => !!att.url)
-          : [];
 
         const fallbackMessage = {
           ...messageContext,
@@ -242,36 +247,68 @@ const emailWorker = new Worker(
 );
 
 // Email sending functions (simplified versions from message.ts)
-async function sendViaGmail(accessToken: string, message: any, threadId?: string | null): Promise<{ threadId: string | null; messageId: string | null }> {
+async function sendViaGmail(
+  accessToken: string,
+  message: any,
+  attachmentLinks: any[],
+  replyThreadId?: string | null,
+  mergedReferences?: string | null
+): Promise<{ threadId: string | null; messageId: string | null }> {
   const auth = new google.auth.OAuth2();
   auth.setCredentials({ access_token: accessToken });
   const gmail = google.gmail({ version: 'v1', auth });
 
-  const cleanedBody = cleanEmailBody(message.body);
   const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
   const ccRecipients = Array.isArray(message.cc) ? message.cc : [];
-  const existingThreadId = threadId || message.threadId || null;
-  const { referencesHeader, parentMessageId } = parseReferences(message.gmailReferences);
+  const effectiveThreadId = replyThreadId || message.threadId || null;
+  const mergedRefs = mergedReferences ?? message.gmailReferences;
+  const { referencesHeader, parentMessageId } = parseReferences(mergedRefs);
   const messageIdHeader = generateMessageId();
 
-  const headerLines = [
-    `To: ${toRecipients.join(', ')}`,
-    ...(ccRecipients.length > 0 ? [`Cc: ${ccRecipients.join(', ')}`] : []),
-    `From: ${message.user.firstname} ${message.user.lastname} <${message.from}>`,
-    `Subject: ${message.subject}`,
-    `Message-ID: ${messageIdHeader}`,
-    ...(parentMessageId ? [`In-Reply-To: ${parentMessageId}`] : []),
-    ...(referencesHeader ? [`References: ${referencesHeader}`] : []),
-  ];
+  // Build MIME with attachments
+  const boundary = `----=_Part_${Math.random().toString(16).slice(2)}`;
+  const lines: string[] = [];
 
-  const emailContent = [
-    'Content-Type: text/html; charset="UTF-8"',
-    'Content-Transfer-Encoding: 7bit',
-    '',
-    cleanedBody,
-  ];
+  lines.push('MIME-Version: 1.0');
+  lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+  lines.push(`To: ${toRecipients.join(', ')}`);
+  if (ccRecipients.length) lines.push(`Cc: ${ccRecipients.join(', ')}`);
+  const senderName = buildSenderDisplayName(message.user, message.from);
+  const encodedSenderName = senderName.replace(/"/g, '\\"');
+  lines.push(`From: "${encodedSenderName}" <${message.from}>`);
+  if (replyThreadId) lines.push(`Thread-Id: ${replyThreadId}`);
+  if (parentMessageId) lines.push(`In-Reply-To: ${parentMessageId}`);
+  if (referencesHeader) lines.push(`References: ${referencesHeader}`);
+  lines.push(`Subject: ${message.subject}`);
+  lines.push(`Message-ID: ${messageIdHeader}`);
+  lines.push('');
 
-  const rawMessage = [...headerLines, ...emailContent].join('\r\n');
+  // Body part
+  lines.push(`--${boundary}`);
+  lines.push('Content-Type: text/html; charset="UTF-8"');
+  lines.push('Content-Transfer-Encoding: 7bit');
+  lines.push('');
+  lines.push(cleanEmailBody(message.body));
+  lines.push('');
+
+  // Attachments
+  for (const att of attachmentLinks || []) {
+    if (!att?.url) continue;
+    const filename = att.filename || att.name || 'attachment';
+    const type = att.type || att.contentType || 'application/octet-stream';
+    const size = Number(att.size) || 0;
+    lines.push(`--${boundary}`);
+    lines.push(`Content-Type: ${type}; name="${filename}"`);
+    lines.push('Content-Transfer-Encoding: base64');
+    lines.push(`Content-Disposition: attachment; filename="${filename}"`);
+    lines.push('');
+    lines.push(Buffer.from(`URL:${att.url}`).toString('base64')); // placeholder, backend should embed actual data if needed
+    lines.push('');
+  }
+
+  lines.push(`--${boundary}--`);
+
+  const rawMessage = lines.join('\r\n');
   const encodedMessage = Buffer.from(rawMessage)
     .toString('base64')
     .replace(/\+/g, '-')
@@ -279,8 +316,8 @@ async function sendViaGmail(accessToken: string, message: any, threadId?: string
     .replace(/=+$/, '');
 
   const requestBody: any = { raw: encodedMessage };
-  if (existingThreadId) {
-    requestBody.threadId = existingThreadId;
+  if (effectiveThreadId) {
+    requestBody.threadId = effectiveThreadId;
   }
 
   const response = await gmail.users.messages.send({
@@ -289,17 +326,23 @@ async function sendViaGmail(accessToken: string, message: any, threadId?: string
   });
 
   return {
-    threadId: response.data.threadId || existingThreadId || null,
+    threadId: response.data.threadId || effectiveThreadId || null,
     messageId: messageIdHeader,
   };
 }
 
-async function sendViaMicrosoftGraph(accessToken: string, message: any, threadId?: string | null): Promise<{ threadId: string | null; messageId: string | null }> {
+async function sendViaMicrosoftGraph(
+  accessToken: string,
+  message: any,
+  attachmentLinks: any[],
+  threadId?: string | null,
+  mergedReferences?: string | null
+): Promise<{ threadId: string | null; messageId: string | null }> {
   const cleanedBody = cleanEmailBody(message.body);
   const toRecipients = Array.isArray(message.to) ? message.to : [message.to];
   const ccRecipients = Array.isArray(message.cc) ? message.cc : [];
   const effectiveThreadId = threadId || message.threadId || null;
-  const { referencesHeader, parentMessageId } = parseReferences(message.gmailReferences);
+  const { referencesHeader, parentMessageId } = parseReferences(mergedReferences ?? message.gmailReferences);
 
   const emailMessage: any = {
     message: {
