@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { cleanEmailBody, sendViaSendgridFallback } from '../routes/message.js';
+import { sendShortlistReminderEmail, sendOnboardingReminderEmail, sendGmailReminderEmail, sendFirstEmailReminderEmail, sendTrialReminderEmail, sendTrialEndingReminderEmail, sendTrialExpiredReminderEmail, sendReengagementReminderEmail, sendUpgradePlanReminderEmail } from '../templates/index.js';
 import { validateSubscriptionUsage } from '../middleware/subscriptionValidation.js';
 import { buildSenderDisplayName } from '../routes/message.js';
 
@@ -63,6 +64,24 @@ function mergeReferences(...refs: (string | null | undefined)[]): string | null 
   return ordered.length ? ordered.join(' ') : null;
 }
 
+async function hasValidGoogleToken(userId: string): Promise<boolean> {
+  const providers = ['google', 'oauth_google'];
+  for (const provider of providers) {
+    try {
+      const googleTokens = await clerkClient.users.getUserOauthAccessToken(userId, provider as any);
+      const tokenData = googleTokens?.data?.[0];
+      if (!tokenData?.token) continue;
+      const expiresAt = (tokenData as any)?.expires_at ?? (tokenData as any)?.expiresAt ?? null;
+      const expiryMs = expiresAt ? (expiresAt > 1e12 ? expiresAt : expiresAt * 1000) : null;
+      if (expiryMs && Date.now() >= expiryMs) continue;
+      return true;
+    } catch (err) {
+      continue;
+    }
+  }
+  return false;
+}
+
 // Redis connection configuration
 const connection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -75,6 +94,449 @@ const connection = {
 const emailWorker = new Worker(
   'email-queue',
   async (job: Job) => {
+    if (job.name === 'gmail-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping Gmail reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        const hasToken = await hasValidGoogleToken(userId);
+        if (hasToken) {
+          console.log(`Skipping Gmail reminder for user ${userId} - Google already connected`);
+          return;
+        }
+
+        const shortlistCount = await prisma.shortlist.count({ where: { userId } });
+        if (shortlistCount < 1) {
+          console.log(`Skipping Gmail reminder for user ${userId} - no shortlists found`);
+          return;
+        }
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendGmailReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+          shortlistCount,
+        });
+        console.log(`Gmail reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing Gmail reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'trial-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+            subscriptionPlan: true,
+            onboardingComplete: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping trial reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        if (!user.onboardingComplete) {
+          console.log(`Skipping trial reminder for user ${userId} - onboarding incomplete`);
+          return;
+        }
+
+        if (user.subscriptionPlan !== 'FREE') {
+          console.log(`Skipping trial reminder for user ${userId} - not on free plan`);
+          return;
+        }
+
+        const shortlistCount = await prisma.shortlist.count({ where: { userId } });
+        if (shortlistCount <= 1) {
+          console.log(`Skipping trial reminder for user ${userId} - shortlist count <= 1`);
+          return;
+        }
+
+        const messageCount = await prisma.message.count({ where: { userId } });
+        if (messageCount > 0) {
+          console.log(`Skipping trial reminder for user ${userId} - messages already sent`);
+          return;
+        }
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendTrialReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+          shortlistCount,
+        });
+        console.log(`Trial reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing trial reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'trial-ending-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+            subscriptionPlan: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping trial ending reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        if (user.subscriptionPlan !== 'FREE') {
+          console.log(`Skipping trial ending reminder for user ${userId} - not on free plan`);
+          return;
+        }
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendTrialEndingReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+        });
+        console.log(`Trial ending reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing trial ending reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'trial-expired-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+            subscriptionPlan: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping trial expired reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        if (user.subscriptionPlan !== 'FREE') {
+          console.log(`Skipping trial expired reminder for user ${userId} - not on free plan`);
+          return;
+        }
+
+        const shortlistCount = await prisma.shortlist.count({ where: { userId } });
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendTrialExpiredReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+          shortlistCount,
+        });
+        console.log(`Trial expired reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing trial expired reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'upgrade-plan-reminder') {
+      const { userId, planName, email, userName, companyName } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+            subscriptionPlan: true,
+          },
+        });
+
+        const targetEmail = email || user?.email;
+
+        if (!user || !targetEmail) {
+          console.warn(`Skipping upgrade reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        if (user.subscriptionPlan === 'FREE') {
+          console.log(`Skipping upgrade reminder for user ${userId} - user still on free plan`);
+          return;
+        }
+
+        const name = userName || [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const company =
+          companyName ||
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendUpgradePlanReminderEmail(targetEmail, {
+          userName: name || 'there',
+          planName: planName || user.subscriptionPlan,
+          companyName: company,
+        });
+        console.log(`Upgrade plan reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing upgrade reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'reengagement-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            onboardingComplete: true,
+            publicMetaData: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping reengagement reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        const clerkUser = await clerkClient.users.getUser(userId);
+        const lastSignIn = (clerkUser as any)?.lastSignInAt || (clerkUser as any)?.last_sign_in_at || null;
+        const lastActive = (clerkUser as any)?.lastActiveAt || (clerkUser as any)?.last_active_at || null;
+        const lastSeenMsRaw = lastActive || lastSignIn;
+        const lastSeenMs = typeof lastSeenMsRaw === 'number'
+          ? (lastSeenMsRaw > 1e12 ? lastSeenMsRaw : lastSeenMsRaw * 1000)
+          : null;
+
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const seenRecently = lastSeenMs ? lastSeenMs >= sevenDaysAgo : false;
+
+        // Only send if onboarding incomplete OR not seen in 7 days
+        if (user.onboardingComplete && seenRecently) {
+          console.log(`Skipping reengagement reminder for user ${userId} - active recently and onboarding complete`);
+          return;
+        }
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendReengagementReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+        });
+        console.log(`Reengagement reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing reengagement reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'first-email-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping first email reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        const hasToken = await hasValidGoogleToken(userId);
+        if (!hasToken) {
+          console.log(`Skipping first email reminder for user ${userId} - no Google connection`);
+          return;
+        }
+
+        const messageCount = await prisma.message.count({ where: { userId } });
+        if (messageCount > 0) {
+          console.log(`Skipping first email reminder for user ${userId} - message already exists`);
+          return;
+        }
+
+        const shortlistCount = await prisma.shortlist.count({ where: { userId } });
+        if (shortlistCount < 1) {
+          console.log(`Skipping first email reminder for user ${userId} - no shortlist found`);
+          return;
+        }
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendFirstEmailReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+          shortlistCount,
+        });
+        console.log(`First email reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing first email reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'onboarding-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+            onboardingComplete: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping onboarding reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        if (user.onboardingComplete) {
+          console.log(`Skipping onboarding reminder for user ${userId} - onboarding already complete`);
+          return;
+        }
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||
+          (user.publicMetaData as any)?.company_name ||
+          'your company';
+
+        await sendOnboardingReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+        });
+        console.log(`Onboarding reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing onboarding reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
+    if (job.name === 'shortlist-reminder') {
+      const { userId } = job.data as any;
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            email: true,
+            firstname: true,
+            lastname: true,
+            publicMetaData: true,
+            onboardingComplete: true,
+          },
+        });
+
+        if (!user || !user.email) {
+          console.warn(`Skipping reminder for user ${userId} - user/email missing`);
+          return;
+        }
+
+        if (!user.onboardingComplete) {
+          console.log(`Skipping reminder for user ${userId} - onboarding not complete`);
+          return;
+        }
+
+        const hasShortlist = await prisma.shortlist.findFirst({
+          where: { userId },
+        });
+
+        if (hasShortlist) {
+          console.log(`Skipping reminder for user ${userId} - shortlist exists`);
+          return;
+        }
+
+        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const companyName =
+          (user.publicMetaData as any)?.companyName ||'your company';
+
+        await sendShortlistReminderEmail(user.email, {
+          userName: name || 'there',
+          companyName,
+        });
+        console.log(`Shortlist reminder sent to ${user.email}`);
+      } catch (error) {
+        console.error(`Error processing shortlist reminder for user ${userId}:`, error);
+        throw error;
+      }
+      return;
+    }
+
     console.log(`Processing scheduled email job ${job.id}`);
     
   const {
