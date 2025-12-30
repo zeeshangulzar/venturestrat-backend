@@ -22,6 +22,7 @@ const prisma = new PrismaClient();
 const allowedOrigins = [
   process.env.FRONTEND_URL_PROD,
   process.env.FRONTEND_URL_LOCAL,
+  process.env.ADMIN_URL,
 ].filter(Boolean);
 console.log('Allowed origins:', allowedOrigins);
 const app = express();

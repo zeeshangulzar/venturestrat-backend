@@ -1,10 +1,30 @@
 // src/routes/shortlist.ts
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { clerkClient } from '@clerk/clerk-sdk-node';
 import { validateSubscriptionUsage, trackUsage } from '../middleware/subscriptionValidation.js';
+import { scheduleGmailReminder, scheduleFirstEmailReminder } from '../services/userLifecycle.js';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+const hasValidGoogleToken = async (userId: string): Promise<boolean> => {
+  const providers = ['google', 'oauth_google'];
+  for (const provider of providers) {
+    try {
+      const googleTokens = await clerkClient.users.getUserOauthAccessToken(userId, provider as any);
+      const tokenData = googleTokens?.data?.[0];
+      if (!tokenData?.token) continue;
+      const expiresAt = (tokenData as any)?.expires_at ?? (tokenData as any)?.expiresAt ?? null;
+      const expiryMs = expiresAt ? (expiresAt > 1e12 ? expiresAt : expiresAt * 1000) : null;
+      if (expiryMs && Date.now() >= expiryMs) continue;
+      return true;
+    } catch (err) {
+      continue;
+    }
+  }
+  return false;
+};
 
 // POST /shortlist
 router.post('/shortlist', async (req, res) => {
@@ -37,6 +57,8 @@ router.post('/shortlist', async (req, res) => {
       return res.status(400).json({ message: 'Investor already shortlisted' });
     }
 
+    const existingCount = await prisma.shortlist.count({ where: { userId: user.id } });
+
     // Validate subscription for adding investor to CRM
     const validation = await validateSubscriptionUsage(userId, 'add_investor');
     if (!validation.allowed) {
@@ -57,6 +79,35 @@ router.post('/shortlist', async (req, res) => {
 
     // Track usage after successful addition
     await trackUsage(userId, 'add_investor');
+
+    // If this is the first shortlist and no Google token, schedule Gmail reminder
+    if (existingCount === 0) {
+      try {
+        const hasToken = await hasValidGoogleToken(userId);
+        if (!hasToken) {
+          await scheduleGmailReminder({
+            userId,
+            email: user.email,
+            userName: [user.firstname, user.lastname].filter(Boolean).join(' '),
+            companyName: user.publicMetaData as any,
+          });
+          console.log(`Scheduled Gmail reminder for user ${userId} after first shortlist`);
+        } else {
+          const messageCount = await prisma.message.count({ where: { userId: user.id } });
+          if (messageCount === 0) {
+            await scheduleFirstEmailReminder({
+              userId,
+              email: user.email,
+              userName: [user.firstname, user.lastname].filter(Boolean).join(' '),
+              companyName: user.publicMetaData as any,
+            });
+            console.log(`Scheduled first email reminder for user ${userId} after first shortlist`);
+          }
+        }
+      } catch (schedErr) {
+        console.error(`Failed to schedule Gmail reminder for user ${userId}:`, schedErr);
+      }
+    }
 
     res.status(201).json(shortlist);
   } catch (error) {

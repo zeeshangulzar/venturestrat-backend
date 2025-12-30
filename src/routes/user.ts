@@ -8,6 +8,7 @@ import { uploadPublicFile, getSignedUrlForAsset } from '../services/storage.js';
 import sharp from 'sharp';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { google } from 'googleapis';
+import { scheduleUpgradePlanReminder } from '../services/userLifecycle.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -419,6 +420,7 @@ router.post('/user/:userId/subscription', async (req, res) => {
     }
 
     const targetPlan = normalizedPlan as SubscriptionPlan;
+    const previousPlan = user.subscriptionPlan;
 
     const customerId = await stripeService.ensureCustomer({
       userId,
@@ -495,6 +497,18 @@ router.post('/user/:userId/subscription', async (req, res) => {
       } catch (paymentMethodError) {
         console.warn(`Failed to fetch payment method for user ${userId}:`, paymentMethodError);
       }
+    }
+
+    if (previousPlan === SubscriptionPlan.FREE && targetPlan !== SubscriptionPlan.FREE) {
+      scheduleUpgradePlanReminder({
+        userId,
+        email: user.email,
+        userName: [user.firstname, user.lastname].filter(Boolean).join(' '),
+        companyName: user.publicMetaData as any,
+        planName: targetPlan,
+      })
+        .then(() => console.log(`Scheduled upgrade plan email for user ${userId}`))
+        .catch((err) => console.error(`Failed to schedule upgrade plan email for user ${userId}:`, err));
     }
 
     return res.json({

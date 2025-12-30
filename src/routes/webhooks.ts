@@ -6,6 +6,7 @@ import { google } from 'googleapis';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { cancelScheduledEmail } from '../services/emailQueue.js';
 import { stripeService } from '../services/stripeService.js';
+import { setupUserLifecycle } from '../services/userLifecycle.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -815,6 +816,15 @@ router.post('/webhooks/clerk', async (req, res) => {
               console.warn(`Stripe is not configured. Skipping subscription provisioning for user ${createdUser.id}`);
             }
             console.log(`User created in the database: updated${id}`);
+
+            setupUserLifecycle({
+              userId: id,
+              email,
+              userName: [first_name, last_name].filter(Boolean).join(' '),
+              companyName: (public_metadata as any)?.companyName || null,
+            }).catch((lifecycleError) => {
+              console.error(`Failed to run lifecycle setup for user ${id}:`, lifecycleError);
+            });
           }
         }
         break;
@@ -1586,4 +1596,3 @@ router.post('/webhooks/gmail-notification', async (req, res) => {
 });
 
 export default router;
-
