@@ -1,4 +1,5 @@
 import { wrapWithShell } from './layout.js';
+import { headingStyle, paragraphStyle } from './styles.js';
 
 const appBaseUrl = process.env.APP_URL || 'https://venturestrat.ai';
 
@@ -22,22 +23,22 @@ export const buildOnboardingReminderEmail = ({
 
   const content = `
     <tr>
-      <td style="padding:40px 30px; color:#222; font-size:15px; line-height:1.7;">
-        <p style="margin:0 0 14px 0;">Hi ${name},</p>
-        <p style="margin:0 0 14px 0;">We noticed you started setting up but haven't finished your profile yet. No worries - it only takes 2 minutes.</p>
-        <p style="margin:0 0 12px 0;">Here's why it matters:</p>
-        <ul style="margin:0 0 16px 18px; padding:0; color:#0c2143;">
+      <td style="padding:40px 30px; ${paragraphStyle}">
+        <p style="${paragraphStyle} margin:0 0 14px 0;">Hi ${name},</p>
+        <p style="${paragraphStyle} margin:0 0 14px 0;">We noticed you started setting up but haven't finished your profile yet. No worries - it only takes 2 minutes.</p>
+        <p style="${headingStyle} margin:0 0 12px 0;">Here's why it matters:</p>
+        <ul style="${paragraphStyle} margin:0 0 16px 18px; padding:0; color:#0C2143;">
           <li style="margin-bottom:8px;">Match you with investors who've backed startups like ${companyName}</li>
           <li style="margin-bottom:8px;">Generate outreach emails that sound authentically like you</li>
           <li style="margin-bottom:8px;">Highlight the right traction, metrics, and milestones</li>
         </ul>
-        <p style="margin:0 0 16px 0;">Without a complete profile, our AI is working blind. With it? We'll show you exactly who to talk to - and exactly what to say.</p>
-        <p style="margin:0 0 16px 0;">You've still got your full 3-day trial waiting.</p>
+        <p style="${paragraphStyle} margin:0 0 16px 0;">Without a complete profile, our AI is working blind. With it? We'll show you exactly who to talk to - and exactly what to say.</p>
+        <p style="${paragraphStyle} margin:0 0 16px 0;">You've still got your full 3-day trial waiting.</p>
         <div style="margin:0 0 24px 0;">
           <a href="${ctaUrl}" style="background:#1e63f4; color:#fff; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; display:inline-block;">Finish Your Profile in 2 Minutes →</a>
         </div>
-        <p style="margin:0;">Stuck on something? Just reply — we're here to help.</p>
-        <p style="margin:16px 0 0 0;">Best,<br/><strong>The VentureStrat Team</strong></p>
+        <p style="${paragraphStyle} margin:0;">Stuck on something? Just reply — we're here to help.</p>
+        <p style="${paragraphStyle} margin:16px 0 0 0;">Best,<br/><strong>The VentureStrat Team</strong></p>
       </td>
     </tr>
   `;

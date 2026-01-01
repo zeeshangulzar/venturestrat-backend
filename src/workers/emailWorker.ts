@@ -415,10 +415,17 @@ const emailWorker = new Worker(
           return;
         }
 
-        const messageCount = await prisma.message.count({ where: { userId } });
-        if (messageCount > 0) {
-          console.log(`Skipping first email reminder for user ${userId} - message already exists`);
+        const sentOrScheduledMessageCount = await prisma.message.count({
+          where: { userId, status: { not: 'DRAFT' } },
+        });
+        if (sentOrScheduledMessageCount > 0) {
+          console.log(`Skipping first email reminder for user ${userId} - message already exists (non-draft)`);
           return;
+        }
+
+        const draftMessageCount = await prisma.message.count({ where: { userId, status: 'DRAFT' } });
+        if (draftMessageCount > 0) {
+          console.log(`First email reminder continuing for user ${userId} - only draft messages found`);
         }
 
         const shortlistCount = await prisma.shortlist.count({ where: { userId } });
