@@ -1,4 +1,5 @@
 import { wrapWithShell } from './layout.js';
+import { headingStyle, paragraphStyle } from './styles.js';
 
 const appBaseUrl = process.env.APP_URL || 'https://venturestrat.ai';
 
@@ -25,21 +26,21 @@ export const buildTrialReminderEmail = ({
 
   const content = `
     <tr>
-      <td style="padding:40px 30px; color:#222; font-size:15px; line-height:1.7;">
-        <p style="margin:0 0 14px 0;">Hi ${name},</p>
-        <p style="margin:0 0 14px 0;">You're halfway through your trial! Here's what founders who convert do in their first 48 hours:</p>
-        <ul style="margin:0 0 16px 18px; padding:0; color:#0c2143; list-style-type: none;">
+      <td style="padding:40px 30px; ${paragraphStyle}">
+        <p style="${paragraphStyle} margin:0 0 14px 0;">Hi ${name},</p>
+        <p style="${headingStyle} margin:0 0 14px 0;">You're halfway through your trial! Here's what founders who convert do in their first 48 hours:</p>
+        <ul style="${paragraphStyle} margin:0 0 16px 18px; padding:0; color:#0C2143; list-style-type: none;">
           <li style="margin-bottom:8px;">✅ Shortlist 10-20 investors (you've added ${countText})</li>
           <li style="margin-bottom:8px;">✅ Connect Gmail and send their first outreach</li>
           <li style="margin-bottom:8px;">✅ Set up auto follow-ups (we'll remind investors if they don't reply)</li>
         </ul>
-        <p style="margin:0 0 16px 0;">You've got 1 day left to test everything for free.</p>
-        <p style="margin:0 0 16px 0;">The best part? Once you send emails, you'll see replies come into VentureStrat's CRM - no more juggling inboxes or spreadsheets.</p>
-        <p style="margin:0 0 16px 0;">Ready to finish strong?</p>
+        <p style="${paragraphStyle} margin:0 0 16px 0;">You've got 1 day left to test everything for free.</p>
+        <p style="${paragraphStyle} margin:0 0 16px 0;">The best part? Once you send emails, you'll see replies come into VentureStrat's CRM - no more juggling inboxes or spreadsheets.</p>
+        <p style="${paragraphStyle} margin:0 0 16px 0;">Ready to finish strong?</p>
         <div style="margin:0 0 24px 0;">
           <a href="${ctaUrl}" style="background:#1e63f4; color:#fff; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; display:inline-block;">Send Your First Outreach →</a>
         </div>
-        <p style="margin:0;">Need a hand? Reply here anytime.<br/>Best,<br/><strong>The VentureStrat Team</strong></p>
+        <p style="${paragraphStyle} margin:0;">Need a hand? Reply here anytime.<br/>Best,<br/><strong>The VentureStrat Team</strong></p>
       </td>
     </tr>
   `;

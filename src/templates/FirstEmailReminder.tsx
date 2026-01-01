@@ -1,4 +1,5 @@
 import { wrapWithShell } from './layout.js';
+import { headingStyle, paragraphStyle } from './styles.js';
 
 const appBaseUrl = process.env.APP_URL || 'https://venturestrat.ai';
 
@@ -25,21 +26,21 @@ export const buildFirstEmailReminderEmail = ({
 
   const content = `
     <tr>
-      <td style="padding:40px 30px; color:#222; font-size:15px; line-height:1.7;">
-        <p style="margin:0 0 14px 0;">Hi ${name},</p>
-        <p style="margin:0 0 14px 0;">You're all set up! Gmail is connected, and you've got ${countText} waiting to hear from ${company}.</p>
-        <p style="margin:0 0 12px 0;">Here's what to do next:</p>
-        <ol style="margin:0 0 16px 18px; padding:0; color:#0c2143;">
+      <td style="padding:40px 30px; ${paragraphStyle}">
+        <p style="${paragraphStyle} margin:0 0 14px 0;">Hi ${name},</p>
+        <p style="${paragraphStyle} margin:0 0 14px 0;">You're all set up! Gmail is connected, and you've got ${countText} waiting to hear from ${company}.</p>
+        <p style="${headingStyle} margin:0 0 12px 0;">Here's what to do next:</p>
+        <ol style="${paragraphStyle} margin:0 0 16px 18px; padding:0; color:#0C2143;">
           <li style="margin-bottom:8px;">Review the AI-generated email we drafted for you</li>
           <li style="margin-bottom:8px;">Personalize it if you'd like (or send as-is)</li>
           <li style="margin-bottom:8px;">Hit send</li>
         </ol>
-        <p style="margin:0 0 16px 0;">Most founders send their first outreach within 10 minutes of this step. Once you do, we'll track opens and replies automatically — and even send follow-ups if they don't respond.</p>
-        <p style="margin:0 0 16px 0;">Let's get your first email out the door.</p>
+        <p style="${paragraphStyle} margin:0 0 16px 0;">Most founders send their first outreach within 10 minutes of this step. Once you do, we'll track opens and replies automatically — and even send follow-ups if they don't respond.</p>
+        <p style="${paragraphStyle} margin:0 0 16px 0;">Let's get your first email out the door.</p>
         <div style="margin:0 0 24px 0;">
           <a href="${ctaUrl}" style="background:#1e63f4; color:#fff; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; display:inline-block;">Send Your First Email →</a>
         </div>
-        <p style="margin:0;">You've got this,<br/><strong>The VentureStrat Team</strong></p>
+        <p style="${paragraphStyle} margin:0;">You've got this,<br/><strong>The VentureStrat Team</strong></p>
       </td>
     </tr>
   `;
