@@ -530,10 +530,11 @@ router.post('/user/:userId/subscription', async (req, res) => {
     }
 
     if (previousPlan === SubscriptionPlan.FREE && targetPlan !== SubscriptionPlan.FREE) {
+      const firstName = (user.firstname || user.lastname || '').trim().split(/\s+/)[0] || '';
       scheduleUpgradePlanReminder({
         userId,
         email: user.email,
-        userName: [user.firstname, user.lastname].filter(Boolean).join(' '),
+        userName: firstName,
         companyName: user.publicMetaData as any,
         planName: targetPlan,
       })

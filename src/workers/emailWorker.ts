@@ -124,7 +124,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||
           (user.publicMetaData as any)?.company_name ||
@@ -185,7 +185,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||
           (user.publicMetaData as any)?.company_name ||
@@ -228,7 +228,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||
           (user.publicMetaData as any)?.company_name ||
@@ -272,7 +272,7 @@ const emailWorker = new Worker(
 
         const shortlistCount = await prisma.shortlist.count({ where: { userId } });
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||
           (user.publicMetaData as any)?.company_name ||
@@ -317,7 +317,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = userName || [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const company =
           companyName ||
           (user.publicMetaData as any)?.companyName ||
@@ -373,7 +373,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||
           (user.publicMetaData as any)?.company_name ||
@@ -434,7 +434,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||
           (user.publicMetaData as any)?.company_name ||
@@ -477,7 +477,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||
           (user.publicMetaData as any)?.company_name ||
@@ -528,7 +528,7 @@ const emailWorker = new Worker(
           return;
         }
 
-        const name = [user.firstname, user.lastname].filter(Boolean).join(' ');
+        const name = user.firstname
         const companyName =
           (user.publicMetaData as any)?.companyName ||'your company';
 

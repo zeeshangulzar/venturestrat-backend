@@ -80,6 +80,8 @@ router.post('/shortlist', async (req, res) => {
     // Track usage after successful addition
     await trackUsage(userId, 'add_investor');
 
+    const firstName = (user.firstname || user.lastname || '').trim().split(/\s+/)[0] || '';
+
     // If this is the first shortlist and no Google token, schedule Gmail reminder
     if (existingCount === 0) {
       try {
@@ -88,7 +90,7 @@ router.post('/shortlist', async (req, res) => {
           await scheduleGmailReminder({
             userId,
             email: user.email,
-            userName: [user.firstname, user.lastname].filter(Boolean).join(' '),
+            userName: firstName,
             companyName: user.publicMetaData as any,
           });
           console.log(`Scheduled Gmail reminder for user ${userId} after first shortlist`);
@@ -98,7 +100,7 @@ router.post('/shortlist', async (req, res) => {
             await scheduleFirstEmailReminder({
               userId,
               email: user.email,
-              userName: [user.firstname, user.lastname].filter(Boolean).join(' '),
+              userName: firstName,
               companyName: user.publicMetaData as any,
             });
             console.log(`Scheduled first email reminder for user ${userId} after first shortlist`);
