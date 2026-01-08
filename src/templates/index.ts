@@ -12,7 +12,7 @@ import buildReengagementReminderEmail, { ReengagementReminderParams } from './Re
 import buildUpgradePlanReminderEmail, { UpgradePlanReminderParams } from './UpgradePlanReminder.js';
 
 const sendgridApiKey = process.env.SENDGRID_API_KEY;
-const defaultFromAddress = process.env.SENDGRID_FROM_ADDRESS || 'support@venturestrat.ai';
+const defaultFromAddress = process.env.SENDGRID_FROM_ADDRESS || 'noreply@venturestrat.ai';
 
 if (!sendgridApiKey) {
   console.warn('SENDGRID_API_KEY is not set; transactional emails will be skipped.');

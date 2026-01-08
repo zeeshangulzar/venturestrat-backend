@@ -46,6 +46,28 @@ const mapPaymentMethodSummary = (paymentMethod: Stripe.PaymentMethod | null) => 
   };
 };
 
+const resetUsageForCurrentPeriod = async (userId: string) => {
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+
+  await prisma.usageTracking.updateMany({
+    where: {
+      userId,
+      month: currentMonth,
+      year: currentYear,
+    },
+    data: {
+      aiDraftsUsed: 0,
+      emailsSent: 0,
+      investorsAdded: 0,
+      monthlyEmailsSent: 0,
+      monthlyInvestorsAdded: 0,
+      monthlyFollowUpEmailsSent: 0,
+    },
+  });
+};
+
 router.post('/createOrFindUser', async (req, res) => {
   const { userId, email } = req.body;
 
@@ -487,6 +509,14 @@ router.post('/user/:userId/subscription', async (req, res) => {
         stripePaymentMethodId: paymentMethodToPersist,
       },
     });
+
+    if (previousPlan !== targetPlan) {
+      try {
+        await resetUsageForCurrentPeriod(userId);
+      } catch (usageError) {
+        console.error(`Failed to reset usage after plan change for user ${userId}:`, usageError);
+      }
+    }
 
     let paymentMethodSummary = null;
 
