@@ -8,7 +8,7 @@ import { uploadPublicFile, getSignedUrlForAsset } from '../services/storage.js';
 import sharp from 'sharp';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { google } from 'googleapis';
-import { scheduleUpgradePlanReminder } from '../services/userLifecycle.js';
+import { scheduleFirstEmailReminder, scheduleUpgradePlanReminder } from '../services/userLifecycle.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -44,6 +44,11 @@ const mapPaymentMethodSummary = (paymentMethod: Stripe.PaymentMethod | null) => 
     expMonth: exp_month ?? undefined,
     expYear: exp_year ?? undefined,
   };
+};
+
+const toFirstName = (first?: string | null, last?: string | null, fallback = 'there') => {
+  const candidate = (first?.trim() || last?.trim() || '').split(/\s+/)[0];
+  return candidate || fallback;
 };
 
 const resetUsageForCurrentPeriod = async (userId: string) => {
@@ -164,6 +169,47 @@ router.get('/user/:userId/status', async (req, res) => {
       google: { hasToken: false, expiresAt: null, isExpired: false },
       microsoft: { hasToken: false, expiresAt: null, isExpired: false },
     });
+  }
+});
+
+// POST /user/:userId/gmail-connected - schedule first email reminder after Gmail connection
+router.post('/user/:userId/gmail-connected', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        email: true,
+        firstname: true,
+        lastname: true,
+        publicMetaData: true,
+      },
+    });
+
+    if (!user || !user.email) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const sentMessages = await prisma.message.count({
+      where: { userId, status: { not: 'DRAFT' } },
+    });
+
+    if (sentMessages > 0) {
+      return res.json({ scheduled: false, reason: 'Messages already sent' });
+    }
+
+    await scheduleFirstEmailReminder({
+      userId,
+      email: user.email,
+      userName: toFirstName(user.firstname, user.lastname),
+      companyName: user.publicMetaData as any,
+    });
+
+    return res.json({ scheduled: true });
+  } catch (error) {
+    console.error(`Error scheduling first email reminder for user ${userId}:`, error);
+    return res.status(500).json({ error: 'Unable to schedule reminder' });
   }
 });
 
