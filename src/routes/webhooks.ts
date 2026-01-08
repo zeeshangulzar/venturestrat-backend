@@ -817,10 +817,12 @@ router.post('/webhooks/clerk', async (req, res) => {
             }
             console.log(`User created in the database: updated${id}`);
 
+            const userFirstName = (first_name || last_name || '').trim().split(/\s+/)[0] || '';
+
             setupUserLifecycle({
               userId: id,
               email,
-              userName: [first_name, last_name].filter(Boolean).join(' '),
+              userName: userFirstName,
               companyName: (public_metadata as any)?.companyName || null,
             }).catch((lifecycleError) => {
               console.error(`Failed to run lifecycle setup for user ${id}:`, lifecycleError);
