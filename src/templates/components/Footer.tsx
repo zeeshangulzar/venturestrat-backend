@@ -6,7 +6,7 @@ export const renderFooter = () => `
       Dubai, UAE<br/><br/>
       <span style="font-size:12px; opacity:0.85; color:#B9BDC2; font-weight:500; letter-spacing:-0.02em;">
         This is an automated email. Do not reply directly. For support, contact:<br/>
-        <a href="mailto:support@venturestrat.ai" style="color:#225bd2; text-decoration:underline; font-weight:700;">support@venturestrat.ai</a>
+        <a href="mailto:support@venturestrat.ai" style="color:#ffffff; text-decoration:underline; font-weight:700;">support@venturestrat.ai</a>
       </span>
     </td>
   </tr>
