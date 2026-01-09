@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { clerkClient } from '@clerk/clerk-sdk-node';
 import { validateSubscriptionUsage, trackUsage } from '../middleware/subscriptionValidation.js';
 import { scheduleGmailReminder, scheduleFirstEmailReminder } from '../services/userLifecycle.js';
+import { getPlanLimits } from '../config/subscriptionPlans.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -198,6 +199,63 @@ router.get('/user/:userId/details', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching user details:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /shortlists/:userId/latest - Latest shortlisted investors capped by plan limit (for CSV export)
+router.get('/shortlists/:userId/latest', async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { subscriptionPlan: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const planLimits = getPlanLimits(user.subscriptionPlan || 'FREE');
+    const limit =
+      (typeof planLimits.investorsPerMonth === 'number' && planLimits.investorsPerMonth > 0
+        ? planLimits.investorsPerMonth
+        : undefined) ??
+      (typeof planLimits.investorsPerDay === 'number' && planLimits.investorsPerDay > 0
+        ? planLimits.investorsPerDay
+        : undefined);
+    console.log(`Applying limit of ${limit} for user ${userId} based on plan ${user.subscriptionPlan}`);
+
+    const shortlists = await prisma.shortlist.findMany({
+      where: { userId },
+      include: {
+        investor: {
+          include: {
+            emails: true,
+          },
+        },
+      },
+      orderBy: {
+        // Use shortlist creation order proxy (newest first) so the latest entries are exported
+        id: 'desc',
+      },
+      take: limit,
+    });
+
+    const investors = shortlists.map((shortlist) => ({
+      ...shortlist.investor,
+      status: shortlist.status,
+      shortlistId: shortlist.id,
+    }));
+
+    res.json({
+      investors,
+      limitApplied: limit ?? null,
+      totalReturned: investors.length,
+    });
+  } catch (error) {
+    console.error('Error fetching latest shortlisted investors:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
