@@ -850,6 +850,15 @@ router.post('/webhooks/clerk', async (req, res) => {
           }
           
           console.log(`Found user ${id} with ${existingUser.shortlists.length} shortlists and ${existingUser.messages.length} messages`);
+
+          if (stripeService.isEnabled() && existingUser.stripeSubscriptionId) {
+            try {
+              await stripeService.cancelSubscription(existingUser.stripeSubscriptionId);
+              console.log(`Cancelled Stripe subscription ${existingUser.stripeSubscriptionId} for user ${id}`);
+            } catch (cancelError) {
+              console.error(`Failed to cancel Stripe subscription ${existingUser.stripeSubscriptionId} for user ${id}:`, cancelError);
+            }
+          }
           
           // Delete all messages associated with this user first
           const deletedMessages = await prisma.message.deleteMany({
@@ -863,6 +872,11 @@ router.post('/webhooks/clerk', async (req, res) => {
           });
           console.log(`Deleted ${deletedShortlists.count} shortlists for user: ${id}`);
 
+          const deletedUsageTracking = await prisma.usageTracking.deleteMany({
+            where: { userId: id }
+          });
+          console.log(`Deleted ${deletedUsageTracking.count} usage tracking records for user: ${id}`);
+          
           // Finally delete the user
           const deletedUser = await prisma.user.delete({
             where: { id: id }

@@ -118,6 +118,11 @@ export const stripeService = {
     return stripe.subscriptions.retrieve(subscriptionId);
   },
 
+  async cancelSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
+    const stripe = assertStripeClient();
+    return stripe.subscriptions.cancel(subscriptionId);
+  },
+
   async createSetupIntent(params: {
     customerId: string;
   }): Promise<Stripe.SetupIntent> {
