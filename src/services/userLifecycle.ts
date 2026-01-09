@@ -18,23 +18,31 @@ type UserSetupParams = {
 };
 
 const SHORTLIST_REMINDER_JOB_PREFIX = 'shortlist-reminder-';
-const REMINDER_DELAY_MS = 24 * 60 * 1000; // 24 minutes (testing)
+const REMINDER_DELAY_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 const ONBOARDING_REMINDER_JOB_PREFIX = 'onboarding-reminder-';
-const ONBOARDING_REMINDER_DELAY_MS = 6 * 60 * 1000; // 6 minutes (testing)
+const ONBOARDING_REMINDER_DELAY_MS = 3 * 60 * 60 * 1000; // 3 hours
+
 const GMAIL_REMINDER_JOB_PREFIX = 'gmail-reminder-';
-const GMAIL_REMINDER_DELAY_MS = 2 * 60 * 1000; // 2 minutes (testing)
+const GMAIL_REMINDER_DELAY_MS = 1 * 60 * 60 * 1000; // 1 hour
+
 const FIRST_EMAIL_REMINDER_JOB_PREFIX = 'first-email-reminder-';
-const FIRST_EMAIL_REMINDER_DELAY_MS = 24 * 60 * 1000; // 24 minutes
+const FIRST_EMAIL_REMINDER_DELAY_MS = 12 * 60 * 60 * 1000; // 12 hours
+
 const TRIAL_REMINDER_JOB_PREFIX = 'trial-reminder-';
-const TRIAL_REMINDER_DELAY_MS = 48 * 60 * 1000; // 48 minutes (testing)
+const TRIAL_REMINDER_DELAY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 const TRIAL_ENDING_REMINDER_JOB_PREFIX = 'trial-ending-reminder-';
-const TRIAL_ENDING_REMINDER_DELAY_MS = 60 * 60 * 1000; // 60 minutes (testing)
+const TRIAL_ENDING_REMINDER_DELAY_MS = 30 * 60 * 60 * 1000; // 30 hours
+
 const TRIAL_EXPIRED_REMINDER_JOB_PREFIX = 'trial-expired-reminder-';
-const TRIAL_EXPIRED_REMINDER_DELAY_MS = 96 * 60 * 1000; // 96 minutes (testing)
+const TRIAL_EXPIRED_REMINDER_DELAY_MS = 48 * 60 * 60 * 1000; // 48 hours
+
 const REENGAGEMENT_REMINDER_JOB_PREFIX = 'reengagement-reminder-';
-const REENGAGEMENT_REMINDER_DELAY_MS = 168 * 60 * 1000; // 168 minutes (testing ~7 days)
+const REENGAGEMENT_REMINDER_DELAY_MS = 84 * 60 * 60 * 1000; // 84 hours (~3.5 days)
+
 const UPGRADE_PLAN_REMINDER_JOB_PREFIX = 'upgrade-plan-reminder-';
-const UPGRADE_PLAN_REMINDER_DELAY_MS = 2 * 60 * 1000; // 2 minutes
+const UPGRADE_PLAN_REMINDER_DELAY_MS = 1 * 60 * 60 * 1000; // 1 hour
 
 export const scheduleShortlistReminder = async ({
   userId,
