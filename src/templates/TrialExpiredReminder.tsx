@@ -31,13 +31,13 @@ export const buildTrialExpiredReminderEmail = ({
         <p style="${paragraphStyle} margin:0 0 14px 0;">Your trial ended yesterday, and we've paused your access to VentureStrat AI.</p>
         <p style="${headingStyle} margin:0 0 12px 0;">Here's what you're missing right now:</p>
         <ul style="${paragraphStyle} margin:0 0 16px 18px; padding:0;">
+          <li style="margin-bottom:8px;">Access to over 120,000 investors</li>
           <li style="margin-bottom:8px;">${countText} you hand-picked for ${company}</li>
           <li style="margin-bottom:8px;">AI-generated outreach emails ready to send</li>
           <li style="margin-bottom:8px;">Reply tracking and follow-up automation</li>
         </ul>
         <p style="${paragraphStyle} margin:0 0 16px 0;">Fundraising is hard enough. Don't let a great tool sit on the sidelines.</p>
         <p style="${paragraphStyle} margin:0 0 12px 0;">Upgrade today and pick up exactly where you left off.</p>
-        <p style="${paragraphStyle} margin:0 0 12px 0;">Starter Plan: $59/mth<br/>Pro Plan: $99/mth</p>
         <div style="margin:0 0 24px 0;">
           <a href="${ctaUrl}" style="background:#1e63f4; color:#fff; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; display:inline-block;">Reactivate Your Account →</a>
         </div>

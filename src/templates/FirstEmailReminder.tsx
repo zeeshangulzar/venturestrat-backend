@@ -31,7 +31,7 @@ export const buildFirstEmailReminderEmail = ({
         <p style="${paragraphStyle} margin:0 0 14px 0;">You're all set up! Gmail is connected, and you've got ${countText} waiting to hear from ${company}.</p>
         <p style="${headingStyle} margin:0 0 12px 0;">Here's what to do next:</p>
         <ol style="${paragraphStyle} margin:0 0 16px 18px; padding:0;">
-          <li style="margin-bottom:8px;">Review the AI-generated email we drafted for you</li>
+          <li style="margin-bottom:8px;">Generate personalized email to the investors</li>
           <li style="margin-bottom:8px;">Personalize it if you'd like (or send as-is)</li>
           <li style="margin-bottom:8px;">Hit send</li>
         </ol>
